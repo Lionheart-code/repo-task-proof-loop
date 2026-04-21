@@ -75,8 +75,8 @@ def main() -> int:
         if "Users should not need to request subagents" in content or "user should not need to request subagents" in content:
             raise SystemExit(f"Codex-facing wording should not imply that Codex child spawning requires no explicit user authorization: {path}")
 
-    if "up to 3 built-in `explorer` children" not in body:
-        raise SystemExit("SKILL.md should cap the Codex explorer fan-out wording at up to 3 parallel helpers.")
+    if "up to 3 `task-scout` or `task-explorer` children" not in body:
+        raise SystemExit("SKILL.md should cap the default Codex read-only helper fan-out wording at up to 3 parallel helpers.")
     if "validate`, `status`" not in body:
         raise SystemExit("SKILL.md should explicitly serialize validate and status after init.")
     if "explicitly asks for delegation or parallel agent work" not in body:
@@ -212,12 +212,14 @@ def main() -> int:
                 raise SystemExit(f"Codex agent template should not mention CLAUDE.md: {path}")
 
         managed_agents = (repo / "AGENTS.md").read_text(encoding="utf-8")
-        if "explorer" not in managed_agents or "worker" not in managed_agents:
-            raise SystemExit("Expected generated AGENTS.md managed block to mention Codex explorer/worker fan-out guidance.")
-        if "before or after spec freeze" not in managed_agents or "only after the spec is frozen" not in managed_agents:
-            raise SystemExit("Expected generated AGENTS.md managed block to distinguish explorer timing from worker timing.")
+        if "task-scout" not in managed_agents or "task-worker-strong" not in managed_agents:
+            raise SystemExit("Expected generated AGENTS.md managed block to mention task-specific helper-role fan-out guidance.")
+        if "read-only discovery and proof probes" not in managed_agents or "only after the spec is frozen" not in managed_agents:
+            raise SystemExit("Expected generated AGENTS.md managed block to distinguish read-only helper timing from post-freeze worker timing.")
         if "explicitly asked for delegation or parallel agent work" not in managed_agents:
             raise SystemExit("Expected generated AGENTS.md managed block to require explicit user authorization before Codex fan-out.")
+        if "fallback when the task-specific roles are unavailable" not in managed_agents:
+            raise SystemExit("Expected generated AGENTS.md managed block to demote built-in helpers to fallback-only guidance.")
         if "task-scout.toml" not in managed_agents or "task-worker-strong.toml" not in managed_agents:
             raise SystemExit("Expected generated AGENTS.md managed block to list the installed helper roles.")
 
@@ -244,10 +246,12 @@ def main() -> int:
             raise SystemExit("Expected COMMANDS.md to document the Codex adaptive fan-out orchestration path.")
         if "`/agent`" not in commands_reference or "child-thread inventory" not in commands_reference:
             raise SystemExit("Expected COMMANDS.md to mention public child-thread inventory guidance for Codex child reuse.")
-        if "up to 3 built-in `explorer` children" not in commands_reference:
-            raise SystemExit("Expected COMMANDS.md to cap the Codex explorer fan-out wording at up to 3 parallel helpers.")
-        if "Spawn one built-in `explorer` child" not in commands_reference or "Spawn one built-in `worker` child" not in commands_reference:
-            raise SystemExit("Expected COMMANDS.md to provide first-class helper prompts for built-in explorer and worker roles.")
+        if "up to 3 `task-scout` or `task-explorer` children" not in commands_reference:
+            raise SystemExit("Expected COMMANDS.md to cap the default Codex read-only helper fan-out wording at up to 3 parallel helpers.")
+        if "fallback when the task-specific helper roles are unavailable in the current product surface" not in commands_reference:
+            raise SystemExit("Expected COMMANDS.md to document built-in explorer/worker as fallback-only roles.")
+        if "Spawn one built-in `explorer` child for TASK_ID <TASK_ID> only because" not in commands_reference or "Spawn one built-in `worker` child for TASK_ID <TASK_ID> only because" not in commands_reference:
+            raise SystemExit("Expected COMMANDS.md to provide fallback-only prompts for built-in explorer and worker roles.")
         if "Spawn one `task-scout` child" not in commands_reference or "Spawn one `task-worker-strong` child" not in commands_reference:
             raise SystemExit("Expected COMMANDS.md to provide first-class prompts for the installed helper roles.")
         if "Do not run `status` or `validate` in parallel with `init`" not in commands_reference:
@@ -274,12 +278,12 @@ def main() -> int:
         skill_prompt = (skill_root / "agents" / "openai.yaml").read_text(encoding="utf-8")
         if "Do not run validate or status until init has fully finished." not in skill_prompt:
             raise SystemExit("Expected Codex default prompt metadata to serialize validate/status after init.")
-        if "explorer" not in skill_prompt or "worker" not in skill_prompt:
-            raise SystemExit("Expected Codex default prompt metadata to mention explorer/worker adaptive fan-out guidance.")
-        if "user explicitly asks for sub-agents, delegation, or parallel agent work" not in skill_prompt:
-            raise SystemExit("Expected Codex default prompt metadata to require explicit user authorization before child spawning.")
         if "task-scout" not in skill_prompt or "task-worker-strong" not in skill_prompt:
             raise SystemExit("Expected Codex default prompt metadata to route work across the installed helper roles.")
+        if "user explicitly asks for sub-agents, delegation, or parallel agent work" not in skill_prompt:
+            raise SystemExit("Expected Codex default prompt metadata to require explicit user authorization before child spawning.")
+        if "fallback when those task-specific roles are unavailable in the current product surface" not in skill_prompt:
+            raise SystemExit("Expected Codex default prompt metadata to demote built-in explorer/worker to fallback-only guidance.")
 
         claude_auto_repo = Path(tmp_dir) / "claude-auto-repo"
         claude_auto_repo.mkdir(parents=True)

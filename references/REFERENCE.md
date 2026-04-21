@@ -153,7 +153,7 @@ Codex adaptive orchestration:
 
 - Keep normal Codex usage auto-mode-first and serial by default. Users do not need child-management details unless they explicitly want delegated or parallel agent work.
 - Only after the user has explicitly asked for sub-agents, delegation, or parallel agent work may the parent choose between the serial path above and bounded fan-out from the frozen spec, repo shape, and current delegation surface.
-- Once delegation is authorized, the parent may fan out bounded built-in `explorer` or `worker` children in parallel when a large Codex task has independent research questions, disjoint write scopes, or several read-only proof probes.
+- Once delegation is authorized, the parent should default to the installed task-specific helper roles for bounded fan-out when a large Codex task has independent research questions, disjoint write scopes, or several read-only proof probes. Use built-in `explorer` or `worker` only as fallback when the task-specific roles are unavailable in the current product surface.
 - Keep helper fan-out modest and wave-based. Prefer up to 3 parallel helper children at once, then wait before the next phase.
 - Keep the task tree shallow. The parent session should orchestrate children directly instead of asking one custom task child to spawn more children.
 - One integration builder still owns `evidence.md` and `evidence.json`.
@@ -186,7 +186,7 @@ Claude adaptive delegation:
 - Codex may also render an `update_plan` checklist or todo list in the UI. Treat that as ephemeral session progress, not as durable proof-loop state.
 - Codex CLI surfaces most relevant to this workflow are `/agent`, `/status`, `/review`, and `/init` (generic scaffold only).
 - Before reusing or resuming a Codex child, inspect the current child-thread list in `/agent` in the CLI or the equivalent child-thread inventory surface exposed by the current Codex product surface.
-- Built-in `explorer` is the preferred Codex role for read-only repo discovery and proof probes. Built-in `worker` is appropriate for bounded disjoint implementation or check shards when explicit ownership is possible.
+- `task-scout` and `task-explorer` are the preferred Codex roles for read-only repo discovery and proof probes. `task-worker-lite` and `task-worker-strong` are the preferred bounded implementation roles when explicit ownership is possible. Built-in `explorer` / `worker` remain fallback options only when the task-specific roles are unavailable in the current product surface.
 - Claude Code also loads `.claude/rules/*.md` and `.claude/CLAUDE.md` as project guidance. The initializer discovers those files when seeding guidance sources for the task.
 - After installing or refreshing `.claude/agents/` in the current Claude Code session, do not assume the new agent list is already available.
 - Claude Code uses the subagent `description` field to decide when the main session should delegate automatically. Phrase project agent descriptions as proactive trigger conditions when you want Claude to pick them on its own.

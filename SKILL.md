@@ -119,10 +119,10 @@ Good fits:
 Codex pattern:
 
 1. `init` stays serial.
-2. If the task is still ambiguous, fan out up to 3 built-in `explorer` children in parallel. Give each one a single question, subsystem, or path scope. Wait for them, then freeze the spec.
+2. If the task is still ambiguous, fan out up to 3 `task-scout` or `task-explorer` children in parallel. Give each one a single question, subsystem, or path scope. Use built-in `explorer` only as fallback when the task-specific helper roles are unavailable in the current product surface. Wait for them, then freeze the spec.
 3. Spawn one spec-freezer child and wait for it.
 4. Spawn one `task-builder` child as the integration owner.
-5. If implementation splits cleanly, the parent may also spawn bounded helper children in parallel. Prefer `task-scout` for cheap lookup work, `task-explorer` for deeper read-only tracing, `task-worker-lite` for one-file or tightly bounded low-risk edits, and `task-worker-strong` for bounded multi-file or ambiguity-prone edits. Each worker-style helper must have explicit file or module ownership and must not write `evidence.md`, `evidence.json`, `verdict.json`, or `problems.md`.
+5. If implementation splits cleanly, the parent may also spawn bounded helper children in parallel. Prefer `task-scout` for cheap lookup work, `task-explorer` for deeper read-only tracing, `task-worker-lite` for one-file or tightly bounded low-risk edits, and `task-worker-strong` for bounded multi-file or ambiguity-prone edits. Use built-in `worker` only as fallback when the task-specific write-capable helper roles are unavailable in the current product surface. Each worker-style helper must have explicit file or module ownership and must not write `evidence.md`, `evidence.json`, `verdict.json`, or `problems.md`.
 6. Use `send_input` or the equivalent follow-up surface to keep the integration builder alive for evidence packing. The builder remains the single owner of the evidence bundle.
 7. If extra proof is needed, the parent may fan out a small bounded set of read-only helpers to rerun disjoint checks or inspect separate proof gaps in parallel. Prefer `task-scout` when the question is just “where” or “which file,” and `task-explorer` when the question is “why” or “what real execution path or contract is involved.” Those children may report commands, outputs, and findings, but they do not write `verdict.json`.
 8. Run exactly one fresh verifier child for each verify pass.
@@ -136,7 +136,7 @@ Codex pattern:
 - In Codex, keep the task tree shallow. The parent session should spawn research, builder, fixer, and verifier children directly instead of asking one custom task child to orchestrate more children.
 - In Codex, once delegation is authorized, choose between one-child-at-a-time delegation and bounded fan-out from the frozen spec, repo shape, and current delegation surface. Keep `init`, evidence ownership, and every verifier pass serialized either way.
 - In Codex, keep helper fan-out modest and wave-based. Prefer up to 3 parallel helper children at once, wait for that wave to finish, then decide the next phase.
-- In Codex, built-in `explorer` is the first choice for read-only repo discovery and proof probes. Built-in `worker` is appropriate for bounded disjoint implementation or check reruns when you can assign explicit ownership.
+- In Codex, the installed task-specific helper roles are the default delegated path. Built-in `explorer` and `worker` are fallback only when the task-specific roles are unavailable in the current product surface.
 - In Codex, reuse the live builder child for evidence packing by sending it a follow-up instruction. Verifier passes must use a fresh child or fresh session; do not satisfy verifier freshness by resuming an earlier verifier. Builder and fixer children can be reused or resumed when you intentionally want that context back.
 - In Codex, keep `task-builder` inheritance-first so the parent session controls implementation depth.
 - In Codex, helper routing should be deliberate and cost-aware. Use `task-scout` for cheap read-only lookup work, `task-explorer` for deeper read-only tracing, `task-worker-lite` for narrow low-risk edits, and `task-worker-strong` for bounded but riskier implementation work. Keep inherited parent strength on the integration owner.

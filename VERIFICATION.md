@@ -20,11 +20,11 @@ python scripts/verify_package.py
 - project-scoped subagent files are created under `.codex/agents/` and `.claude/agents/`
 - `AGENTS.md` and `CLAUDE.md` are created with managed workflow blocks
 - generated Codex agent files stay Codex-specific and do not tell Codex to read `CLAUDE.md`
-- generated Codex AGENTS guidance mentions the bounded `explorer` / `worker` fan-out path
-- generated Codex AGENTS guidance allows `explorer` fan-out before or after spec freeze and keeps `worker` fan-out post-freeze only
+- generated Codex AGENTS guidance mentions the bounded task-specific helper-role fan-out path and keeps built-in generic helpers as fallback only
+- generated Codex AGENTS guidance allows `task-scout` / `task-explorer` read-only fan-out before or after spec freeze and keeps `task-worker-lite` / `task-worker-strong` post-freeze only
 - generated Codex task-builder template still defines a single integration owner for evidence
-- the Codex-facing skill metadata prompt mentions the `explorer` / `worker` adaptive fan-out path
-- `references/COMMANDS.md` documents the Codex adaptive fan-out orchestration path, includes first-class built-in `explorer` / `worker` helper prompts, and mentions public child-thread inspection surfaces
+- the Codex-facing skill metadata prompt mentions the task-specific helper-role adaptive fan-out path and keeps built-in generic helpers as fallback only
+- `references/COMMANDS.md` documents the Codex adaptive fan-out orchestration path, makes the task-specific helper roles the default delegated path, and mentions public child-thread inspection surfaces
 - seeded guidance discovery includes `AGENTS.override.md` before `AGENTS.md`
 - seeded guidance discovery includes nested `.claude/rules/**/*.md` files
 - `--guides auto --install-subagents claude` creates `CLAUDE.md` even if the repo previously only had `AGENTS.md`

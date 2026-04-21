@@ -7,8 +7,8 @@ Replace `<TASK_ID>` and any placeholder text.
 Codex orchestration mapping:
 
 - `spawn_agent`: spawn one child with `agent_type` set to the role name from `.codex/agents/`
-- built-in `explorer`: preferred Codex role for bounded read-only discovery and proof probes
-- built-in `worker`: appropriate for bounded disjoint implementation or check shards when explicit ownership is possible
+- built-in `explorer`: fallback Codex role for bounded read-only discovery and proof probes when the installed task-specific helper roles are unavailable in the current product surface
+- built-in `worker`: fallback Codex role for bounded disjoint implementation or check shards when the installed task-specific helper roles are unavailable in the current product surface
 - `send_input`: preferred way to reuse a live builder child for evidence packing
 - `resume_agent`: available when you intentionally want an older builder or fixer child back; do not use it to satisfy verifier freshness
 - child-thread inventory: inspect the current child list before reusing or resuming a child. In Codex CLI, use `/agent`; in other Codex surfaces, use the exposed thread inventory if available.
@@ -111,35 +111,37 @@ Installed helper roles in this skill:
 - `task-worker-lite`: one-file or tightly bounded low-risk implementation role
 - `task-worker-strong`: bounded multi-file or ambiguity-prone implementation role
 
-### Parent prompt for parallel `explorer` children
+### Parent prompt for parallel read-only helper children
 
 ```text
-Spawn up to 3 built-in `explorer` children for TASK_ID <TASK_ID>.
+Spawn up to 3 `task-scout` or `task-explorer` children for TASK_ID <TASK_ID>.
 
-Before spawning, inspect the current child-thread list and reuse an already-live scoped explorer only if it is still the right fit.
+Before spawning, inspect the current child-thread list and reuse an already-live scoped helper only if it is still the right fit.
 
-Each explorer must get exactly one scope:
+Each helper must get exactly one scope:
 - path prefix or subsystem
 - question to answer
 - read-only boundary
 
-Each explorer returns only:
+Each helper returns only:
 - scope inspected
 - findings
 - risks
 - recommended next checks
 
-Wait for all explorers. Then fold their findings into one spec-freezer, builder, or verifier step.
+If the installed task-specific helper roles are unavailable in the current product surface, fall back to built-in `explorer` with the same bounded scopes.
+
+Wait for all helpers. Then fold their findings into one spec-freezer, builder, or verifier step.
 ```
 
-### Parent prompt for parallel `worker` children
+### Parent prompt for parallel implementation helper children
 
 ```text
-Spawn a bounded set of built-in `worker` children for TASK_ID <TASK_ID>.
+Spawn a bounded set of `task-worker-lite` or `task-worker-strong` children for TASK_ID <TASK_ID>.
 
-Before spawning, inspect the current child-thread list and avoid duplicating an existing scoped worker unless you intentionally want a fresh child.
+Before spawning, inspect the current child-thread list and avoid duplicating an existing scoped helper unless you intentionally want a fresh child.
 
-For each worker, define:
+For each helper, define:
 - exact file or module ownership
 - acceptance criteria subset or check shard
 - no-touch boundaries
@@ -151,19 +153,23 @@ Rules:
 - do not write .agent/tasks/<TASK_ID>/problems.md
 - report files changed and checks run back to the parent
 
-After the workers finish, continue the primary task-builder child so it can integrate the current repo state and own evidence packing.
+If the installed task-specific write-capable helper roles are unavailable in the current product surface, fall back to built-in `worker` with the same bounded scopes.
+
+After the helpers finish, continue the primary task-builder child so it can integrate the current repo state and own evidence packing.
 ```
 
-### Parent prompts for built-in helper children in Codex adaptive fan-out
+### Parent prompts for task-specific helper children in Codex adaptive fan-out
 
 Use these when the task clearly benefits from bounded parallel work and the user has already explicitly asked for delegation or parallel agent work. Once delegation is authorized, choose them from task shape and current delegation availability, keep the task tree shallow, and keep proof-loop artifact ownership with the custom `task-*` roles.
 Keep helper fan-out modest and wave-based. Prefer up to 3 parallel helper children at once, then wait before the next phase.
-Keep helper routing parent-driven. Let `task-builder` inherit the parent session level. Prefer the installed helper roles over the built-ins when you want predictable cost control:
+Keep helper routing parent-driven. Let `task-builder` inherit the parent session level. Prefer the installed helper roles as the default delegated path:
 
 - `task-scout` when the question is “where is it,” “who owns it,” “which test covers it,” or “which files matter”
 - `task-explorer` when the question is “why does it behave this way,” “what contracts or invariants matter,” or “what is the real execution path”
 - `task-worker-lite` when the change is narrow, explicit, and low-risk
 - `task-worker-strong` when the change is still bounded but spans several files, has ambiguity, or has real regression risk
+
+Use built-in `explorer` or `worker` only as fallback when a task-specific role is unavailable in the current product surface.
 
 If the task is too broad, too architecture-heavy, or too unclear, keep it on the parent or on the main `task-builder` instead of forcing a helper.
 
@@ -254,10 +260,10 @@ Return only:
 - residual risks
 ```
 
-#### Built-in `explorer`
+### Fallback prompt for built-in `explorer`
 
 ```text
-Spawn one built-in `explorer` child for TASK_ID <TASK_ID>.
+Spawn one built-in `explorer` child for TASK_ID <TASK_ID> only because the installed task-specific read-only helper roles are unavailable in the current product surface.
 
 Scope:
 - <one bounded question, subsystem, or path prefix>
@@ -274,10 +280,10 @@ Return only:
 - proof or verification gaps worth folding into the spec or evidence plan
 ```
 
-#### Built-in `worker`
+### Fallback prompt for built-in `worker`
 
 ```text
-Spawn one built-in `worker` child for TASK_ID <TASK_ID>.
+Spawn one built-in `worker` child for TASK_ID <TASK_ID> only because the installed task-specific write-capable helper roles are unavailable in the current product surface.
 
 Scope:
 - <one bounded implementation or check shard>
@@ -331,7 +337,7 @@ Rules:
 - Every PASS must cite concrete proof
 - FAIL and UNKNOWN must explain the gap
 - Overall PASS only if every AC is PASS
-- If sibling `explorer` or `worker` children gathered raw outputs, fold them into the evidence bundle here instead of letting each child write its own parallel evidence file
+- If sibling helper children gathered raw outputs, fold them into the evidence bundle here instead of letting each child write its own parallel evidence file
 - Prefer raw artifacts over narrative prose
 
 Return only:
@@ -473,7 +479,7 @@ Choose between this path and the simpler serial order automatically from the fro
 1. init <TASK_ID>
 2. wait for init to finish, then confirm .agent/tasks/<TASK_ID>/spec.md exists
 3. inspect the current child-thread list with /agent in the CLI or the current product's exposed child-thread inventory surface
-4. if the spec is not stable yet, fan out up to 3 built-in `explorer` children in parallel with disjoint questions or path scopes
+4. if the spec is not stable yet, fan out up to 3 `task-scout` or `task-explorer` children in parallel with disjoint questions or path scopes; use built-in `explorer` only as fallback when the task-specific helper roles are unavailable in the current product surface
 5. wait for those explorers, then freeze <TASK_ID> using one spec-freezer child
 6. spawn one task-builder child as the integration owner
 7. if implementation splits cleanly, fan out bounded helper children in parallel:
@@ -481,6 +487,7 @@ Choose between this path and the simpler serial order automatically from the fro
    - `task-explorer` for deeper read-only tracing
    - `task-worker-lite` for narrow low-risk edits
    - `task-worker-strong` for bounded multi-file or ambiguity-prone edits
+   - use built-in `explorer` or `worker` only as fallback when the task-specific roles are unavailable in the current product surface
 8. continue the live builder with send_input so it integrates the current repo state, reruns focused checks, and evidence <TASK_ID>
 9. if proof still needs extra read-only probes, fan out bounded `task-scout` or `task-explorer` children in parallel to rerun disjoint checks or inspect separate proof gaps
 10. wait for those proof explorers, then run verify <TASK_ID> using one fresh verifier child

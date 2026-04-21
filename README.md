@@ -27,7 +27,7 @@ It creates a durable task folder under `.agent/tasks/<TASK_ID>/`, installs proje
 
 `spec freeze -> build -> evidence -> fresh verify -> minimal fix -> fresh verify`
 
-For Codex, that loop also supports an adaptive bounded fan-out path for `explorer` or `worker` children when the task splits cleanly.
+For Codex, that loop also supports an adaptive bounded fan-out path for the installed task-specific helper roles, with built-in `explorer` / `worker` kept only as fallback when those roles are unavailable in the current product surface.
 
 The point is simple: keep proof inside the repository, separate implementation from verification, and make task state easy to resume or audit later.
 
@@ -110,11 +110,13 @@ Use this prompt for the normal flow:
 ### Do Task
 
 ```text
-Use $repo-task-proof-loop to do the task described below in this repository. Reuse the matching repo-local task if it already exists; if not, initialize it first and then continue automatically after init completes. You are explicitly authorized to use subagents and bounded parallel helper work when it materially helps. Choose the best internal orchestration automatically from the current task shape and tool surface. Keep the proof-loop phase explicit as you work so matching project agents can be picked automatically when the product supports that, otherwise continue on the main thread. Keep the task tree shallow, keep one integration builder responsible for evidence, and keep every verifier pass fresh.
+Use $repo-task-proof-loop to do the task described below in this repository. Reuse the matching repo-local task if it already exists; if not, initialize it first and then continue automatically after init completes. You are explicitly authorized to use subagents and bounded parallel helper work when it materially helps.
 ...
 ```
 
-For all prompts, replace `...` with either `Task file: <path/to/task-file.md>` on the next line or the task text pasted on following lines.
+For all prompts, replace `...` with `Task ID: <task-id>` and either `Task file: <path/to/task-file.md>` on the next line or the task text pasted on following lines.
+
+This short prompt is the canonical entrypoint. Do not push routing policy into the user prompt; keep orchestration inside the skill.
 
 This skill is intentionally proof-first, so `init` always comes before build.
 Keep `task-builder` inheritance-first so the parent session controls implementation depth. Use the installed helper roles to save tokens on bounded work:
@@ -124,7 +126,7 @@ Keep `task-builder` inheritance-first so the parent session controls implementat
 - `task-worker-lite` for one-file or tightly bounded low-risk edits
 - `task-worker-strong` for bounded multi-file or ambiguity-prone edits
 
-The parent/orchestrator stays strong; the helper layer does the cheaper bounded work.
+The parent/orchestrator stays strong; the helper layer does the cheaper bounded work. Built-in `explorer` / `worker` are fallback only when the task-specific roles are unavailable in the current product surface.
 
 For users, the intended interaction stays simple: run Codex, mention `$repo-task-proof-loop`, and describe the task.
 

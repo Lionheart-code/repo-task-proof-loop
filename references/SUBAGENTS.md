@@ -56,17 +56,17 @@ This installed copy pins the roles that can be safely bounded:
 
 That split keeps the main implementation path strong while reducing spend on read-heavy or tightly-scoped helper roles.
 
-Codex also ships built-in `default`, `worker`, and `explorer` roles. This skill adds task-specific roles alongside those built-ins rather than replacing the general-purpose ones.
+Codex also ships built-in `default`, `worker`, and `explorer` roles. This skill adds task-specific roles alongside those built-ins and treats the built-ins as fallback options rather than the default delegated path.
 Per the Codex subagents docs, optional fields such as `model` and `model_reasoning_effort` inherit from the parent session when omitted. This skill uses that inheritance intentionally for `task-builder` and for the built-in helper roles unless the parent explicitly chooses otherwise.
 
-## Built-in Codex roles in this workflow
+## Built-in Codex roles as fallback in this workflow
 
-- Use built-in `explorer` for bounded read-only discovery before spec freeze and for read-only proof probes after build.
-- Use built-in `worker` only when the task cleanly splits into disjoint implementation or check shards with explicit ownership.
+- Use built-in `explorer` only when you need a read-only helper and the installed task-specific helper roles are unavailable in the current product surface.
+- Use built-in `worker` only when you need a bounded write helper and the installed task-specific write-capable helper roles are unavailable in the current product surface.
 - Keep `task-builder` as the integration owner. Even in broader-task Codex fan-out runs, that role remains the single writer for `evidence.md` and `evidence.json`.
 - Keep `task-verifier` as the single fresh judge. Parallel helper children may gather inputs, but they do not write `verdict.json`.
 
-## Built-in helper routing
+## Installed helper routing
 
 Keep `task-builder` inheritance-first so the parent session controls implementation depth.
 
@@ -77,7 +77,7 @@ For installed helper roles:
 - `task-worker-lite` for one-file or tightly bounded low-risk edits
 - `task-worker-strong` for bounded multi-file or ambiguity-prone edits
 - Keep ambiguous, architecture-touching, or integration-heavy work on the parent or `task-builder`
-- Built-in `explorer` and `worker` still exist, but these installed helper roles are the predictable cost-controlled path for this workflow
+- Built-in `explorer` and `worker` still exist, but these installed helper roles are the default cost-controlled path for this workflow
 
 ## Role definitions
 
@@ -183,18 +183,18 @@ Spawn one `task-spec-freezer` agent for TASK_ID <TASK_ID>. Wait for it. Tell it 
 
 Repeat the same pattern for `task-builder`, `task-verifier`, and `task-fixer`.
 
-Keep delegation depth flat. The narrower-task path uses one child per role at a time; the broader-task path may fan out multiple bounded `explorer` or `worker` children in parallel.
+Keep delegation depth flat. The narrower-task path uses one child per role at a time; the broader-task path may fan out multiple bounded task-specific helper children in parallel.
 
 Fan-out variant:
 
 ```text
-Spawn two `explorer` children in parallel for TASK_ID <TASK_ID>.
+Spawn two `task-explorer` children in parallel for TASK_ID <TASK_ID>.
 
-Explorer A scope:
+Task-explorer A scope:
 - path prefix: <PATH_A>
 - question: <QUESTION_A>
 
-Explorer B scope:
+Task-explorer B scope:
 - path prefix: <PATH_B>
 - question: <QUESTION_B>
 

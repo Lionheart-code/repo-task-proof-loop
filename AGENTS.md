@@ -17,7 +17,7 @@ Hard rules:
 - Do not claim completion unless every acceptance criterion is `PASS`.
 - Verifiers judge current code and current command results, not prior chat claims.
 - Fixers should make the smallest defensible diff.
-- For broad Codex tasks, bounded fan-out is allowed only after `init`, only when the user has explicitly asked for delegation or parallel agent work, and only when task shape warrants it: use bounded `explorer` children before or after spec freeze, use bounded `worker` children only after the spec is frozen, keep the task tree shallow, keep evidence ownership with one builder, and keep verdict ownership with one fresh verifier.
+- For broad Codex tasks, bounded fan-out is allowed only after `init`, only when the user has explicitly asked for delegation or parallel agent work, and only when task shape warrants it: prefer bounded `task-scout` or `task-explorer` children for read-only discovery and proof probes, use `task-worker-lite` or `task-worker-strong` only after the spec is frozen, keep the task tree shallow, keep evidence ownership with one builder, and keep verdict ownership with one fresh verifier. Use built-in generic helpers only as fallback when the task-specific roles are unavailable in the current product surface.
 - This root `AGENTS.md` block is the repo-wide Codex baseline. More-specific nested `AGENTS.override.md` or `AGENTS.md` files still take precedence for their directory trees.
 - Keep this block lean. If the workflow needs more Codex guidance, prefer nested `AGENTS.md` / `AGENTS.override.md` files or configured fallback guide docs instead of expanding this root block indefinitely.
 
