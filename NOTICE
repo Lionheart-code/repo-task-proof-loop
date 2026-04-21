@@ -1,0 +1,18 @@
+This repository is a modified fork of:
+https://github.com/DenisSergeevitch/repo-task-proof-loop
+
+Original upstream project:
+- repo-task-proof-loop
+- copyright and license remain governed by Apache License 2.0
+
+This fork contains Codex-focused changes, including:
+- Codex-only default initialization
+- Windows path normalization fixes
+- Codex helper routing roles:
+  - task-scout
+  - task-explorer
+  - task-worker-lite
+  - task-worker-strong
+- documentation and verification updates for the Codex-first fork shape
+
+See FORK.md for a higher-level summary of the fork intent.
