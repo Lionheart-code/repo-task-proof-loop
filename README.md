@@ -15,6 +15,8 @@ This fork keeps the upstream proof-loop structure and Apache-2.0 license, but ch
   - `task-worker-strong`
 - `task-builder` stays inheritance-first as the strong integration owner
 
+Codex is the maintained default path in this fork. Claude-facing files and flags remain only as optional compatibility surfaces when explicitly requested; they are not the primary workflow described by this repository.
+
 If you publish this repository to GitHub, users can install it via the Codex skill installer by pointing it at the published repo or its root `SKILL.md`.
 
 This skill was built from [OpenClaw-RL: Train Any Agent Simply by Talking](https://arxiv.org/html/2603.10165v1) and applies its proven approach to agentic flows in a repo-local workflow.
@@ -63,7 +65,7 @@ Inside the target repository:
 
 ```
 
-When Claude support is explicitly requested, it can also install:
+When Claude compatibility is explicitly requested, it can also install:
 
 ```text
 .claude/agents/
@@ -76,7 +78,7 @@ When Claude support is explicitly requested, it can also install:
 It also inserts managed workflow blocks into the repo guide files that match the selected profile:
 
 - the repo-root `AGENTS.md` Codex baseline
-- the repo's Claude guide file: `CLAUDE.md` or `.claude/CLAUDE.md`
+- optionally, the repo's Claude guide file: `CLAUDE.md` or `.claude/CLAUDE.md`
 
 ## Install
 
@@ -95,13 +97,13 @@ Install the skill as a project skill.
 .agents/skills/repo-task-proof-loop/
 ```
 
-### Claude Code
+### Claude Code compatibility
 
 ```text
 .claude/skills/repo-task-proof-loop/
 ```
 
-If you use both tools on the same repository, install it in both locations or keep one canonical copy and sync it.
+If you still need both tools on the same repository, install it in both locations or keep one canonical copy and sync it. The default and documented path in this fork is the Codex install above.
 
 ## Quick Prompts
 
@@ -145,6 +147,7 @@ The bundled helper script currently ships three CLI commands:
 - `status` - inspect an existing initialized task
 
 The workflow phases `freeze`, `build`, `evidence`, `verify`, `fix`, and `run` are skill-level commands for the agent, not direct CLI subcommands in this package.
+By default, `init` installs only the Codex path. Claude files are created only when you explicitly ask for them with `--install-subagents claude|both` and matching guide options.
 
 Set `SKILL_PATH` to the installed skill directory:
 
@@ -154,7 +157,7 @@ Set `SKILL_PATH` to the installed skill directory:
 SKILL_PATH=.agents/skills/repo-task-proof-loop
 ```
 
-### Claude Code example
+### Claude Code compatibility example
 
 ```bash
 SKILL_PATH=.claude/skills/repo-task-proof-loop
@@ -210,7 +213,7 @@ python3 "$SKILL_PATH/scripts/task_loop.py" init \
   --guides agents
 ```
 
-With `--guides auto`, the initializer preserves existing guide files, but it also ensures `CLAUDE.md` exists whenever Claude agents are being installed and `AGENTS.md` exists whenever Codex agents are being installed.
+With `--guides auto`, the initializer preserves existing guide files, ensures `AGENTS.md` exists whenever Codex agents are being installed, and ensures `CLAUDE.md` exists only when Claude compatibility agents are being installed.
 
 ## Validation
 

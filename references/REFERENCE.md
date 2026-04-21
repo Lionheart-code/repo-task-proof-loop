@@ -4,6 +4,7 @@
 When the examples below mention `scripts/task_loop.py`, that path is relative to this skill root. Run it while your shell working directory is inside the target repository.
 
 This skill is designed to be portable, but the repository-local artifacts and subagent files it creates must stay in the target repository.
+The maintained path in this fork is Codex-first. Claude-related files below describe optional compatibility behavior that is still available in code when explicitly requested.
 
 ## Recommended install locations
 
@@ -15,7 +16,7 @@ Project skill:
 Personal skill:
 - `$HOME/.agents/skills/repo-task-proof-loop/`
 
-### Claude Code
+### Claude Code compatibility
 
 Project skill:
 - `.claude/skills/repo-task-proof-loop/`
@@ -23,7 +24,7 @@ Project skill:
 Personal skill:
 - `~/.claude/skills/repo-task-proof-loop/`
 
-The same skill directory can be reused in either product. The initialization script writes repo-local workflow files into the current repository, not into the skill directory.
+The same skill directory can be reused in either product. The initialization script writes repo-local workflow files into the current repository, not into the skill directory. In this fork, Codex remains the default install and initialization path.
 
 Claude Code note:
 - This skill manages its workflow block in the project-root `CLAUDE.md`.
@@ -69,12 +70,12 @@ The initializer also creates or refreshes these project-level integration files:
 And it inserts a managed workflow block into:
 
 - repo-root `AGENTS.md`
-- one Claude guide file: `CLAUDE.md` or `.claude/CLAUDE.md`
+- optionally, one Claude guide file: `CLAUDE.md` or `.claude/CLAUDE.md`
 
 If both Claude guide locations exist, the initializer updates the repo-root `CLAUDE.md` and leaves `.claude/CLAUDE.md` untouched. The managed block is replaced in place on re-run, so user-authored content outside the managed markers is preserved.
 For Codex, the managed block always lives in repo-root `AGENTS.md`. That file acts as the repo-wide baseline. More-specific nested `AGENTS.override.md`, `AGENTS.md`, or configured fallback filenames still take precedence in their directory trees, and the initializer does not rewrite them.
 If `init` creates or rewrites `AGENTS.md` during a running Codex session, start a new Codex session before relying on the updated instructions.
-In Claude Code, `CLAUDE.md` is the project guide file Claude checks during onboarding. When `--guides auto` is used together with `--install-subagents claude` or `--install-subagents both`, the initializer ensures `CLAUDE.md` exists even if the repo previously only had `AGENTS.md`.
+In the optional Claude compatibility path, `CLAUDE.md` is the project guide file Claude checks during onboarding. When `--guides auto` is used together with `--install-subagents claude` or `--install-subagents both`, the initializer ensures `CLAUDE.md` exists even if the repo previously only had `AGENTS.md`.
 
 ## Commands
 
@@ -110,9 +111,9 @@ scripts/task_loop.py init --task-id my-task --guides claude
 scripts/task_loop.py init --task-id my-task --guides none
 ```
 
-For Claude Code, `--guides auto` updates an existing `CLAUDE.md` or `.claude/CLAUDE.md`. If neither exists and Claude subagents are being installed, it creates `CLAUDE.md`.
+For the optional Claude compatibility path, `--guides auto` updates an existing `CLAUDE.md` or `.claude/CLAUDE.md`. If neither exists and Claude subagents are being installed, it creates `CLAUDE.md`.
 
-`--guides auto` keeps existing guide files up to date, creates both guides when none exist yet, and also creates the product-native guide when you install that product's agents (`CLAUDE.md` for Claude, `AGENTS.md` for Codex).
+`--guides auto` keeps existing guide files up to date, creates both guides when none exist yet, and also creates the product-native guide when you install that product's agents (`CLAUDE.md` for the optional Claude path, `AGENTS.md` for Codex).
 
 Control which project subagent sets are installed:
 
@@ -168,7 +169,7 @@ Codex adaptive orchestration:
 
 For exact prompts to use with child agents, see `references/COMMANDS.md`.
 
-Claude adaptive delegation:
+Claude compatibility delegation:
 
 - Let the main Claude Code session decide whether to auto-delegate the current proof-loop phase to a matching project subagent. Users should not need to name a specific Claude subagent for normal operation.
 - Keep prompts phase-focused so the current need is obvious, for example “freeze the spec”, “run a fresh verification pass”, or “repair the non-PASS criteria”.

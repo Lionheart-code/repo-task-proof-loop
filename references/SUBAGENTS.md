@@ -1,6 +1,6 @@
 # Subagent integration
 
-This skill installs project-scoped subagent templates for both Codex and Claude Code.
+This skill installs project-scoped subagent templates for Codex by default and can still install Claude compatibility templates when explicitly requested.
 
 On the Codex side, these are custom agent TOML config layers, not a separate manifest format.
 
@@ -19,7 +19,7 @@ On the Codex side, these are custom agent TOML config layers, not a separate man
 .codex/agents/task-fixer.toml
 ```
 
-### Claude Code
+### Claude Code compatibility
 
 ```text
 .claude/agents/task-spec-freezer.md
@@ -201,7 +201,7 @@ Task-explorer B scope:
 Wait for both. Then fold their findings into one spec-freezer or builder step.
 ```
 
-## Claude Code invocation pattern
+## Claude Code compatibility invocation pattern
 
 Use the installed project subagents from `.claude/agents/`. Claude Code can automatically delegate from the main session to a matching subagent based on the task request, the subagent description, and current context, so normal proof-loop prompts do not need to name an agent explicitly.
 Because this skill writes agent files directly on disk, if `init` just created or refreshed `.claude/agents/*` during the current Claude Code session, do not assume those refreshed agents are already available.

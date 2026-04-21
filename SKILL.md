@@ -1,8 +1,8 @@
 ---
 name: repo-task-proof-loop
-description: Repo-local workflow skill for large coding tasks. Initializes .agent/tasks/TASK_ID artifacts, installs project-scoped Codex and Claude subagents, updates AGENTS.md plus the repo's Claude guide file with the workflow, and runs a spec-freeze → build → evidence → verify → fix loop with fresh-session verification.
+description: Repo-local proof-loop skill for large coding tasks. Initializes .agent/tasks/TASK_ID artifacts, installs Codex subagents by default, optionally installs Claude compatibility files when explicitly requested, updates repo guidance, and runs a spec-freeze → build → evidence → verify → fix loop with fresh-session verification.
 license: Apache-2.0
-compatibility: Skills-compatible coding agents. Integrates with Codex and Claude Code project-scoped subagents. Bundled scripts require Python 3.10+.
+compatibility: Skills-compatible coding agents. Maintained for Codex-first project-scoped subagents, with optional Claude compatibility surfaces when explicitly requested. Bundled scripts require Python 3.10+.
 metadata:
   author: OpenAI
   version: "1.0.0"
@@ -22,7 +22,7 @@ When the examples below mention `scripts/task_loop.py`, that path is relative to
 
 1. Initializes a strict repo-local task folder under `.agent/tasks/<TASK_ID>/`
 2. Seeds or updates the required artifact files
-3. Installs project-scoped subagent templates for the selected profile into `.codex/agents/` and, when requested, `.claude/agents/`
+3. Installs project-scoped Codex subagent templates by default into `.codex/agents/` and, only when explicitly requested, Claude compatibility files into `.claude/agents/`
 4. Updates the matching repo guide files with a managed block that explains the workflow
 5. Guides the agent through a strict loop:
    - spec freeze
@@ -42,7 +42,7 @@ See:
 
 Treat the following words as commands when the user invokes this skill:
 
-- `init <TASK_ID>`: create `.agent/tasks/<TASK_ID>/`, install or refresh subagent templates, and update `AGENTS.md` plus the repo's Claude guide file
+- `init <TASK_ID>`: create `.agent/tasks/<TASK_ID>/`, install or refresh the selected subagent templates, and update the matching guide files
 - `freeze <TASK_ID>`: create or refine `spec.md` from the user task, task file, and repo guidance
 - `build <TASK_ID>`: implement the task against the frozen spec
 - `evidence <TASK_ID>`: create or refresh `evidence.md`, `evidence.json`, and raw artifacts without changing production code
@@ -85,7 +85,7 @@ The initializer will:
 For Codex, the initializer keeps its managed workflow block in the repo-root `AGENTS.md`. Codex also supports `AGENTS.override.md` and configured fallback guide filenames; nested files closer to the code still take precedence, and this skill intentionally does not overwrite them.
 If `init` creates or rewrites `AGENTS.md` during a running Codex session, start a new Codex session before relying on the updated instructions. Codex snapshots project-doc guidance at session start.
 
-For Claude Code, the initializer keeps its managed workflow block in the repo-root `CLAUDE.md`. Claude Code also supports `.claude/CLAUDE.md`, `.claude/rules/*.md`, and `CLAUDE.local.md`, but this skill treats root `CLAUDE.md` as the primary project guide because Claude surfaces it directly.
+If you explicitly enable Claude compatibility, the initializer keeps its managed workflow block in the repo-root `CLAUDE.md`. Claude Code also supports `.claude/CLAUDE.md`, `.claude/rules/*.md`, and `CLAUDE.local.md`, but that path is compatibility-only in this fork rather than the primary documented workflow.
 
 In Claude Code, if `init` just wrote or refreshed `.claude/agents/*` during the current session, do not assume those updated agents are already available mid-session.
 
