@@ -1,0 +1,23 @@
+{
+  "task_id": "{{TASK_ID}}",
+  "policy_version": "router-v2",
+  "route_phase": "unrouted",
+  "delegation_mode": "serial",
+  "complexity": "unknown",
+  "risk_level": "unknown",
+  "authorization_source": "skill-invocation",
+  "assumptions": [
+    "Prefer the smallest valid decomposition that preserves proof ownership.",
+    "Do not schedule write-capable children before the spec is frozen."
+  ],
+  "pending_questions": [
+    "Run route before delegating work."
+  ],
+  "single_owner_roles": {
+    "orchestrator": "parent-session",
+    "builder": "task-builder",
+    "verifier": "task-verifier"
+  },
+  "planned_dispatches": [],
+  "updated_at": "{{UPDATED_AT}}"
+}

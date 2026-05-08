@@ -9,6 +9,7 @@ On the Codex side, these are custom agent TOML config layers, not a separate man
 ### Codex
 
 ```text
+.codex/agents/task-router.toml
 .codex/agents/task-spec-freezer.toml
 .codex/agents/task-scout.toml
 .codex/agents/task-explorer.toml
@@ -45,10 +46,11 @@ The Codex templates also use `nickname_candidates` for cleaner UI labels when se
 Other `config.toml` keys could be added later if needed, but this skill mostly inherits the parent session's model, sandbox, tools, and MCP configuration.
 This installed copy pins the roles that can be safely bounded:
 
-- `task-spec-freezer` -> `gpt-5.4-mini`, `medium`, `read-only`
+- `task-router` -> `gpt-5.5`, `medium`, `read-only`
+- `task-spec-freezer` -> `gpt-5.5`, `low`, `read-only`
 - `task-scout` -> `gpt-5.4-mini`, `low`, `read-only`
 - `task-explorer` -> `gpt-5.4-mini`, `high`, `read-only`
-- `task-verifier` -> `gpt-5.4`, `medium`, `read-only`
+- `task-verifier` -> `gpt-5.5`, `medium`, `read-only`
 - `task-worker-lite` -> `gpt-5.4-mini`, `medium`
 - `task-worker-strong` -> `gpt-5.4`, `high`
 - `task-fixer` -> `gpt-5.4-mini`, `medium`
@@ -69,6 +71,7 @@ Per the Codex subagents docs, optional fields such as `model` and `model_reasoni
 ## Installed helper routing
 
 Keep `task-builder` inheritance-first so the parent session controls implementation depth.
+Route child work from `.agent/tasks/<TASK_ID>/routing.json` and the matching brief under `.agent/tasks/<TASK_ID>/dispatches/` instead of assuming a full raw parent chat handoff.
 
 For installed helper roles:
 
@@ -80,6 +83,16 @@ For installed helper roles:
 - Built-in `explorer` and `worker` still exist, but these installed helper roles are the default cost-controlled path for this workflow
 
 ## Role definitions
+
+### `task-router`
+
+Purpose:
+- Produce durable route decisions and scoped dispatch briefs from repo-local task artifacts
+
+Hard boundaries:
+- Must not write production code
+- Must not schedule write-capable roles before the spec is frozen
+- Must prefer the smallest valid decomposition
 
 ### `task-spec-freezer`
 
@@ -154,8 +167,9 @@ Do not batch `init` with other commands or tool calls.
 
 Codex-native expectations that matter here:
 
-- The parent-orchestrator must explicitly spawn a new child, and in Codex it may do so only after the user has explicitly asked for sub-agents, delegation, or parallel agent work.
-- Once delegation is authorized, the parent chooses the specific child roles. The user does not need to name the exact role or slash-command flow.
+- The parent-orchestrator must explicitly spawn a new child when the route result calls for one.
+- Skill invocation is treated as authorization for bounded orchestration inside this workflow, but the route result should still prefer serial execution unless delegation is materially useful.
+- The parent chooses the specific child roles. The user does not need to name the exact role or slash-command flow.
 - Keep the task tree shallow. The parent session should orchestrate children directly instead of asking one custom task child to spawn more children.
 - Inspect the current child-thread list with `/agent` in the CLI or the equivalent child-thread inventory surface exposed by the current Codex product surface before respawning or resuming a child.
 - Use `send_input` to continue a live child.
@@ -168,7 +182,7 @@ Default Codex path for narrower tasks:
 - Same builder child for evidence.
 - Fresh verifier child for every verify pass.
 
-Adaptive Codex fan-out path for broader tasks after delegation is explicitly authorized:
+Adaptive Codex fan-out path for broader tasks when routing explicitly chooses bounded fan-out:
 
 - Fan out up to 3 `task-scout` or `task-explorer` children in parallel when the task needs parallel discovery before the spec is stable.
 - Keep one `task-builder` child as the integration owner.

@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
-"""Initialize and validate repo-local task proof loop artifacts."""
+"""Initialize, route, and validate repo-local task proof loop artifacts."""
 
 from __future__ import annotations
 
 import argparse
 import json
-import os
 from pathlib import Path
 import re
 import subprocess
@@ -17,20 +16,31 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 SKILL_ROOT = SCRIPT_DIR.parent
 TEMPLATES_DIR = SKILL_ROOT / "assets" / "templates"
 
-REQUIRED_TASK_FILES = [
-    "spec.md",
-    "evidence.md",
-    "evidence.json",
-    "verdict.json",
-    "problems.md",
-    "raw/build.txt",
-    "raw/test-unit.txt",
-    "raw/test-integration.txt",
-    "raw/lint.txt",
-    "raw/screenshot-1.png",
+REQUIRED_TASK_ENTRIES: list[tuple[str, str]] = [
+    ("spec.md", "file"),
+    ("routing.json", "file"),
+    ("dispatches", "dir"),
+    ("evidence.md", "file"),
+    ("evidence.json", "file"),
+    ("verdict.json", "file"),
+    ("problems.md", "file"),
+    ("raw/build.txt", "file"),
+    ("raw/test-unit.txt", "file"),
+    ("raw/test-integration.txt", "file"),
+    ("raw/lint.txt", "file"),
+    ("raw/screenshot-1.png", "file"),
 ]
 
 STATUS_VALUES = {"PASS", "FAIL", "UNKNOWN"}
+ROUTE_PHASE_VALUES = {"unrouted", "pre-freeze", "post-freeze"}
+ROUTE_PHASE_CHOICES = {"auto", "pre-freeze", "post-freeze"}
+DELEGATION_MODE_VALUES = {"serial", "discovery_fanout", "implementation_fanout"}
+COMPLEXITY_VALUES = {"trivial", "bounded", "broad", "unknown"}
+RISK_LEVEL_VALUES = {"low", "medium", "high", "unknown"}
+DISPATCH_STATUS_VALUES = {"planned", "completed", "skipped"}
+READ_ONLY_ROUTE_ROLES = {"task-scout", "task-explorer"}
+WRITE_CAPABLE_ROUTE_ROLES = {"task-builder", "task-worker-lite", "task-worker-strong", "task-fixer"}
+ROUTING_POLICY_VERSION = "router-v2"
 INIT_SENTINEL_FILE = ".init-in-progress"
 
 PNG_PLACEHOLDER = (
@@ -263,6 +273,7 @@ def template_context(task_id: str, repo_root: Path, current: Path, task_file: st
     return {
         "TASK_ID": task_id,
         "CREATED_AT": utc_now_iso(),
+        "UPDATED_AT": utc_now_iso(),
         "REPO_ROOT": str(repo_root.resolve()),
         "WORKING_DIR": str(current.resolve()),
         "GUIDANCE_SOURCES": guidance_bullets(repo_root, current),
@@ -275,6 +286,7 @@ def install_task_files(task_dir: Path, context: dict[str, str], *, force: bool =
 
     file_map = {
         task_dir / "spec.md": render_template(load_text_template("spec.md.tmpl"), context),
+        task_dir / "routing.json": render_template(load_text_template("routing.json.tmpl"), context),
         task_dir / "evidence.md": render_template(load_text_template("evidence.md.tmpl"), context),
         task_dir / "evidence.json": render_template(load_text_template("evidence.json.tmpl"), context),
         task_dir / "verdict.json": render_template(load_text_template("verdict.json.tmpl"), context),
@@ -293,6 +305,11 @@ def install_task_files(task_dir: Path, context: dict[str, str], *, force: bool =
     if write_binary_file(screenshot, PNG_PLACEHOLDER, force=force):
         created.append(str(screenshot))
 
+    dispatches_dir = task_dir / "dispatches"
+    dispatches_dir.mkdir(parents=True, exist_ok=True)
+    if str(dispatches_dir) not in created:
+        created.append(str(dispatches_dir))
+
     return created
 
 
@@ -301,6 +318,7 @@ def install_codex_agents(repo_root: Path) -> list[str]:
     target_dir.mkdir(parents=True, exist_ok=True)
     written: list[str] = []
     for template_name in (
+        "task-router.toml.tmpl",
         "task-spec-freezer.toml.tmpl",
         "task-scout.toml.tmpl",
         "task-explorer.toml.tmpl",
@@ -383,6 +401,328 @@ def json_load(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def task_entry_exists(task_dir: Path, rel_path: str, kind: str) -> bool:
+    target = task_dir / rel_path
+    if kind == "file":
+        return target.is_file()
+    if kind == "dir":
+        return target.is_dir()
+    raise ValueError(f"Unsupported task entry kind: {kind}")
+
+
+def read_task_text(task_dir: Path, rel_path: str) -> str:
+    return (task_dir / rel_path).read_text(encoding="utf-8")
+
+
+def extract_markdown_section(text: str, heading: str) -> str:
+    pattern = re.compile(
+        rf"^## {re.escape(heading)}\n(.*?)(?=^## |\Z)",
+        re.DOTALL | re.MULTILINE,
+    )
+    match = pattern.search(text)
+    return match.group(1).strip() if match else ""
+
+
+def parse_acceptance_criteria(spec_text: str) -> list[dict[str, Any]]:
+    section = extract_markdown_section(spec_text, "Acceptance criteria")
+    entries: list[dict[str, Any]] = []
+    current: dict[str, Any] | None = None
+    for raw_line in section.splitlines():
+        line = raw_line.rstrip()
+        match = re.match(r"-\s+(AC\d+):\s+(.*)", line)
+        if match:
+            current = {
+                "id": match.group(1),
+                "text": match.group(2).strip(),
+                "notes": [],
+            }
+            entries.append(current)
+            continue
+        if current and line.startswith("  - "):
+            current["notes"].append(line[4:].strip())
+        elif current and line.startswith("    "):
+            note_lines = current["notes"]
+            if note_lines:
+                note_lines[-1] = f"{note_lines[-1]} {line.strip()}".strip()
+    return entries
+
+
+def parse_csv_like_list(text: str) -> list[str]:
+    if not text.strip():
+        return []
+    return [item.strip() for item in text.split(",") if item.strip()]
+
+
+def extract_note_value(notes: list[str], label: str) -> list[str]:
+    prefix = f"{label}:"
+    for note in notes:
+        if note.lower().startswith(prefix.lower()):
+            return parse_csv_like_list(note.split(":", 1)[1].strip())
+    return []
+
+
+def derive_route_hints(ac: dict[str, Any]) -> tuple[list[str], list[str], str | None]:
+    notes = ac.get("notes", [])
+    allowed_paths = extract_note_value(notes, "Allowed paths")
+    no_touch_paths = extract_note_value(notes, "No-touch paths")
+    required_output_values = extract_note_value(notes, "Required output")
+    required_output = required_output_values[0] if required_output_values else None
+    return allowed_paths, no_touch_paths, required_output
+
+
+def spec_is_frozen(spec_text: str) -> bool:
+    criteria = parse_acceptance_criteria(spec_text)
+    if not criteria:
+        return False
+    if any("TODO" in item["text"] for item in criteria):
+        return False
+    constraints = extract_markdown_section(spec_text, "Constraints")
+    non_goals = extract_markdown_section(spec_text, "Non-goals")
+    verification_plan = extract_markdown_section(spec_text, "Verification plan")
+    if any("TODO" in section for section in (constraints, non_goals, verification_plan)):
+        return False
+    return True
+
+
+def detect_complexity(text: str, criteria_count: int) -> str:
+    lowered = text.lower()
+    if any(marker in lowered for marker in ("migration", "cross-file", "multi-file", "architecture", "broad", "orchestr")):
+        return "broad"
+    if criteria_count <= 1 and len(lowered) < 220:
+        return "trivial"
+    if criteria_count >= 3 or "fan-out" in lowered or "parallel" in lowered:
+        return "broad"
+    return "bounded"
+
+
+def detect_risk_level(text: str) -> str:
+    lowered = text.lower()
+    if any(marker in lowered for marker in ("migration", "security", "verification", "critical", "high-risk", "judge")):
+        return "high"
+    if any(marker in lowered for marker in ("routing", "subagent", "parallel", "fan-out", "integration")):
+        return "medium"
+    return "low"
+
+
+def pending_questions_for_spec(spec_text: str) -> list[str]:
+    questions: list[str] = []
+    if "TODO" in extract_markdown_section(spec_text, "Acceptance criteria"):
+        questions.append("Acceptance criteria still contain TODO markers.")
+    if "TODO" in extract_markdown_section(spec_text, "Constraints"):
+        questions.append("Constraints still contain TODO markers.")
+    if "TODO" in extract_markdown_section(spec_text, "Non-goals"):
+        questions.append("Non-goals still contain TODO markers.")
+    if not spec_is_frozen(spec_text):
+        questions.append("Spec is not yet frozen; write-capable children must wait.")
+    return questions
+
+
+def karpathy_assumptions(route_phase: str) -> list[str]:
+    assumptions = [
+        "Prefer the smallest valid decomposition that still preserves proof ownership.",
+        "Each child brief should answer one question or own one implementation shard.",
+        "Do not broaden scope beyond frozen acceptance criteria.",
+    ]
+    if route_phase == "pre-freeze":
+        assumptions.append("Before freeze, routing may only schedule read-only discovery roles.")
+    return assumptions
+
+
+def task_statement_from_spec(spec_text: str) -> str:
+    return extract_markdown_section(spec_text, "Original task statement")
+
+
+def spec_summary_text(spec_text: str) -> str:
+    return "\n".join(
+        part
+        for part in (
+            task_statement_from_spec(spec_text),
+            extract_markdown_section(spec_text, "Acceptance criteria"),
+            extract_markdown_section(spec_text, "Constraints"),
+        )
+        if part
+    )
+
+
+def build_dispatch_brief(task_id: str, dispatch: dict[str, Any]) -> str:
+    allowed_paths = dispatch["allowed_paths"] or ["(inherit from parent or repo-wide scope)"]
+    no_touch_paths = dispatch["no_touch_paths"] or ["(none)"]
+    input_artifacts = dispatch["input_artifacts"] or ["spec.md"]
+    ac_ids = dispatch["ac_ids"] or ["(not scoped to a single AC)"]
+    return "\n".join(
+        [
+            f"# Dispatch Brief: {dispatch['dispatch_id']}",
+            "",
+            f"- Task ID: {task_id}",
+            f"- Phase: {dispatch['phase']}",
+            f"- Role: {dispatch['role']}",
+            f"- Status: {dispatch['status']}",
+            "",
+            "## Objective",
+            dispatch["objective"],
+            "",
+            "## Acceptance criteria scope",
+            *[f"- {item}" for item in ac_ids],
+            "",
+            "## Allowed paths",
+            *[f"- {item}" for item in allowed_paths],
+            "",
+            "## No-touch paths",
+            *[f"- {item}" for item in no_touch_paths],
+            "",
+            "## Input artifacts",
+            *[f"- {item}" for item in input_artifacts],
+            "",
+            "## Required output",
+            f"- {dispatch['required_output']}",
+            "",
+            "## Guardrails",
+            "- Treat this brief plus the frozen spec as the complete task contract.",
+            "- State assumptions explicitly instead of guessing.",
+            "- Prefer the smallest defensible change or finding set.",
+            "- Do not broaden scope beyond the objective and AC subset above.",
+        ]
+    ) + "\n"
+
+
+def remove_stale_dispatch_briefs(dispatches_dir: Path) -> None:
+    for path in dispatches_dir.glob("dispatch-*.md"):
+        path.unlink()
+
+
+def write_dispatch_briefs(task_dir: Path, task_id: str, dispatches: list[dict[str, Any]]) -> list[str]:
+    dispatches_dir = task_dir / "dispatches"
+    dispatches_dir.mkdir(parents=True, exist_ok=True)
+    remove_stale_dispatch_briefs(dispatches_dir)
+    written: list[str] = []
+    for dispatch in dispatches:
+        path = dispatches_dir / f"{dispatch['dispatch_id']}.md"
+        path.write_text(build_dispatch_brief(task_id, dispatch), encoding="utf-8")
+        written.append(str(path))
+    return written
+
+
+def route_pre_freeze(task_id: str, spec_text: str) -> tuple[str, list[dict[str, Any]]]:
+    summary = spec_summary_text(spec_text).lower()
+    discovery_dispatches: list[dict[str, Any]] = []
+    if any(token in summary for token in ("where", "which", "map", "ownership", "lookup", "tests", "config")):
+        discovery_dispatches.append(
+            {
+                "dispatch_id": "dispatch-scout-discovery",
+                "phase": "route-pre-freeze",
+                "role": "task-scout",
+                "objective": "Map the minimum relevant files, tests, configs, and ownership signals needed to freeze the spec.",
+                "ac_ids": [],
+                "allowed_paths": [],
+                "no_touch_paths": [],
+                "input_artifacts": ["spec.md", "routing.json"],
+                "required_output": "Return direct findings, relevant paths, and unresolved lookup questions for the spec freezer.",
+                "status": "planned",
+            }
+        )
+    if any(token in summary for token in ("why", "trace", "flow", "contract", "invariant", "causality", "drift", "route")):
+        discovery_dispatches.append(
+            {
+                "dispatch_id": "dispatch-explorer-tracing",
+                "phase": "route-pre-freeze",
+                "role": "task-explorer",
+                "objective": "Trace the real execution path, contracts, and invariants needed to freeze the spec without guessing.",
+                "ac_ids": [],
+                "allowed_paths": [],
+                "no_touch_paths": [],
+                "input_artifacts": ["spec.md", "routing.json"],
+                "required_output": "Return concrete execution facts, invariants, and risks that change the frozen spec.",
+                "status": "planned",
+            }
+        )
+    if discovery_dispatches:
+        return "discovery_fanout", discovery_dispatches[:3]
+    return "serial", []
+
+
+def worker_role_for_ac(text: str, allowed_paths: list[str]) -> str:
+    lowered = text.lower()
+    if len(allowed_paths) > 1 or any(token in lowered for token in ("multi-file", "risk", "migration", "integration", "router", "verifier")):
+        return "task-worker-strong"
+    return "task-worker-lite"
+
+
+def route_post_freeze(task_id: str, spec_text: str) -> tuple[str, list[dict[str, Any]]]:
+    criteria = parse_acceptance_criteria(spec_text)
+    dispatches: list[dict[str, Any]] = [
+        {
+            "dispatch_id": "dispatch-task-builder-integration",
+            "phase": "build",
+            "role": "task-builder",
+            "objective": "Act as the single integration owner, implement against the frozen spec, and retain evidence ownership.",
+            "ac_ids": [item["id"] for item in criteria],
+            "allowed_paths": [],
+            "no_touch_paths": [],
+            "input_artifacts": ["spec.md", "routing.json"],
+            "required_output": "Implement the frozen task, integrate sibling findings if any, and keep evidence ownership with the builder.",
+            "status": "planned",
+        }
+    ]
+
+    worker_dispatches: list[dict[str, Any]] = []
+    for item in criteria:
+        allowed_paths, no_touch_paths, required_output = derive_route_hints(item)
+        if not allowed_paths:
+            continue
+        worker_dispatches.append(
+            {
+                "dispatch_id": f"dispatch-{item['id'].lower()}",
+                "phase": "build",
+                "role": worker_role_for_ac(item["text"], allowed_paths),
+                "objective": item["text"],
+                "ac_ids": [item["id"]],
+                "allowed_paths": allowed_paths,
+                "no_touch_paths": no_touch_paths,
+                "input_artifacts": ["spec.md", "routing.json"],
+                "required_output": required_output or "Return files changed, checks run, and residual risks for the scoped AC shard.",
+                "status": "planned",
+            }
+        )
+
+    if worker_dispatches:
+        dispatches.extend(worker_dispatches)
+        return "implementation_fanout", dispatches
+    return "serial", dispatches
+
+
+def build_routing_data(task_id: str, spec_text: str, requested_phase: str) -> dict[str, Any]:
+    criteria = parse_acceptance_criteria(spec_text)
+    summary = spec_summary_text(spec_text)
+    route_phase = requested_phase
+    if requested_phase == "auto":
+        route_phase = "post-freeze" if spec_is_frozen(spec_text) else "pre-freeze"
+
+    delegation_mode, planned_dispatches = (
+        route_pre_freeze(task_id, spec_text)
+        if route_phase == "pre-freeze"
+        else route_post_freeze(task_id, spec_text)
+    )
+
+    return {
+        "task_id": task_id,
+        "policy_version": ROUTING_POLICY_VERSION,
+        "route_phase": route_phase,
+        "delegation_mode": delegation_mode,
+        "complexity": detect_complexity(summary, len(criteria)),
+        "risk_level": detect_risk_level(summary),
+        "authorization_source": "skill-invocation",
+        "assumptions": karpathy_assumptions(route_phase),
+        "pending_questions": pending_questions_for_spec(spec_text),
+        "single_owner_roles": {
+            "orchestrator": "parent-session",
+            "builder": "task-builder",
+            "verifier": "task-verifier",
+        },
+        "planned_dispatches": planned_dispatches,
+        "updated_at": utc_now_iso(),
+    }
+
+
 def validate_evidence(data: Any, task_id: str) -> list[str]:
     errors: list[str] = []
     required_keys = {
@@ -446,6 +786,86 @@ def validate_verdict(data: Any, task_id: str) -> list[str]:
     return errors
 
 
+def validate_routing(data: Any, task_id: str, task_dir: Path) -> list[str]:
+    errors: list[str] = []
+    required_keys = {
+        "task_id",
+        "policy_version",
+        "route_phase",
+        "delegation_mode",
+        "complexity",
+        "risk_level",
+        "authorization_source",
+        "assumptions",
+        "pending_questions",
+        "single_owner_roles",
+        "planned_dispatches",
+        "updated_at",
+    }
+    dispatch_required_keys = {
+        "dispatch_id",
+        "phase",
+        "role",
+        "objective",
+        "ac_ids",
+        "allowed_paths",
+        "no_touch_paths",
+        "input_artifacts",
+        "required_output",
+        "status",
+    }
+    if not isinstance(data, dict):
+        return ["routing.json must contain a JSON object."]
+    missing = sorted(required_keys - set(data.keys()))
+    if missing:
+        errors.append(f"routing.json missing keys: {', '.join(missing)}")
+    if data.get("task_id") != task_id:
+        errors.append("routing.json task_id does not match the requested TASK_ID.")
+    if data.get("route_phase") not in ROUTE_PHASE_VALUES:
+        errors.append("routing.json route_phase must be unrouted, pre-freeze, or post-freeze.")
+    if data.get("delegation_mode") not in DELEGATION_MODE_VALUES:
+        errors.append("routing.json delegation_mode must be serial, discovery_fanout, or implementation_fanout.")
+    if data.get("complexity") not in COMPLEXITY_VALUES:
+        errors.append("routing.json complexity must be trivial, bounded, broad, or unknown.")
+    if data.get("risk_level") not in RISK_LEVEL_VALUES:
+        errors.append("routing.json risk_level must be low, medium, high, or unknown.")
+    if not isinstance(data.get("assumptions"), list):
+        errors.append("routing.json assumptions must be a list.")
+    if not isinstance(data.get("pending_questions"), list):
+        errors.append("routing.json pending_questions must be a list.")
+    if not isinstance(data.get("single_owner_roles"), dict):
+        errors.append("routing.json single_owner_roles must be an object.")
+    planned_dispatches = data.get("planned_dispatches")
+    if not isinstance(planned_dispatches, list):
+        errors.append("routing.json planned_dispatches must be a list.")
+        planned_dispatches = []
+    dispatches_dir = task_dir / "dispatches"
+    for index, item in enumerate(planned_dispatches):
+        if not isinstance(item, dict):
+            errors.append(f"routing.json planned_dispatches[{index}] must be an object.")
+            continue
+        missing_dispatch_keys = sorted(dispatch_required_keys - set(item.keys()))
+        if missing_dispatch_keys:
+            errors.append(
+                f"routing.json planned_dispatches[{index}] missing keys: {', '.join(missing_dispatch_keys)}"
+            )
+        if item.get("status") not in DISPATCH_STATUS_VALUES:
+            errors.append(
+                f"routing.json planned_dispatches[{index}].status must be planned, completed, or skipped."
+            )
+        role = item.get("role")
+        if data.get("route_phase") == "pre-freeze" and role in WRITE_CAPABLE_ROUTE_ROLES:
+            errors.append("routing.json pre-freeze routing must not schedule write-capable roles.")
+        if data.get("route_phase") == "pre-freeze" and role not in READ_ONLY_ROUTE_ROLES:
+            errors.append("routing.json pre-freeze routing may only schedule task-scout or task-explorer.")
+        dispatch_id = item.get("dispatch_id")
+        if isinstance(dispatch_id, str) and dispatch_id:
+            brief_path = dispatches_dir / f"{dispatch_id}.md"
+            if not brief_path.exists():
+                errors.append(f"Dispatch brief missing for {dispatch_id}: {brief_path}")
+    return errors
+
+
 def cmd_init(args: argparse.Namespace) -> int:
     current = Path(args.repo_root).resolve() if args.repo_root else Path.cwd().resolve()
     repo_root = discover_repo_root(current)
@@ -479,13 +899,53 @@ def cmd_init(args: argparse.Namespace) -> int:
         clear_init_in_progress(task_dir)
 
 
+def cmd_route(args: argparse.Namespace) -> int:
+    current = Path(args.repo_root).resolve() if args.repo_root else Path.cwd().resolve()
+    repo_root = discover_repo_root(current)
+    task_id = validate_task_id(args.task_id)
+    task_dir = repo_root / ".agent" / "tasks" / task_id
+
+    if not task_dir.exists():
+        fail(f"Task directory does not exist: {task_dir}")
+    if init_sentinel_path(task_dir).exists():
+        fail("Task initialization is still in progress. Rerun route after init completes.")
+
+    spec_path = task_dir / "spec.md"
+    if not spec_path.exists():
+        fail(f"Missing spec.md for TASK_ID {task_id}: {spec_path}")
+
+    spec_text = spec_path.read_text(encoding="utf-8")
+    routing = build_routing_data(task_id, spec_text, args.phase)
+    routing_path = task_dir / "routing.json"
+    routing_path.write_text(json.dumps(routing, indent=2) + "\n", encoding="utf-8")
+    written_dispatches = write_dispatch_briefs(task_dir, task_id, routing["planned_dispatches"])
+
+    result = {
+        "repo_root": str(repo_root),
+        "task_id": task_id,
+        "task_dir": str(task_dir),
+        "route_phase": routing["route_phase"],
+        "delegation_mode": routing["delegation_mode"],
+        "complexity": routing["complexity"],
+        "risk_level": routing["risk_level"],
+        "planned_dispatch_count": len(routing["planned_dispatches"]),
+        "dispatch_briefs": written_dispatches,
+    }
+    print(json.dumps(result, indent=2))
+    return 0
+
+
 def cmd_validate(args: argparse.Namespace) -> int:
     current = Path(args.repo_root).resolve() if args.repo_root else Path.cwd().resolve()
     repo_root = discover_repo_root(current)
     task_id = validate_task_id(args.task_id)
     task_dir = repo_root / ".agent" / "tasks" / task_id
 
-    missing = [str(task_dir / rel) for rel in REQUIRED_TASK_FILES if not (task_dir / rel).exists()]
+    missing = [
+        str(task_dir / rel_path)
+        for rel_path, kind in REQUIRED_TASK_ENTRIES
+        if not task_entry_exists(task_dir, rel_path, kind)
+    ]
     errors: list[str] = []
     init_in_progress = init_sentinel_path(task_dir).exists()
 
@@ -497,8 +957,16 @@ def cmd_validate(args: argparse.Namespace) -> int:
             "Rerun validate after init completes."
         )
 
+    routing_path = task_dir / "routing.json"
     evidence_path = task_dir / "evidence.json"
     verdict_path = task_dir / "verdict.json"
+
+    if routing_path.exists():
+        try:
+            routing = json_load(routing_path)
+            errors.extend(validate_routing(routing, task_id, task_dir))
+        except Exception as exc:
+            errors.append(f"Failed to parse routing.json: {exc}")
 
     if evidence_path.exists():
         try:
@@ -541,13 +1009,30 @@ def cmd_status(args: argparse.Namespace) -> int:
         "exists": task_dir.exists(),
         "init_in_progress": init_sentinel_path(task_dir).exists(),
         "required_files_present": {},
+        "routing_ready": False,
+        "route_phase": None,
+        "delegation_mode": None,
+        "planned_dispatch_count": 0,
         "evidence_overall_status": None,
         "verdict_overall_status": None,
         "non_pass_criteria": [],
     }
 
-    for rel in REQUIRED_TASK_FILES:
-        report["required_files_present"][rel] = (task_dir / rel).exists()
+    for rel_path, kind in REQUIRED_TASK_ENTRIES:
+        key = f"{rel_path}/" if kind == "dir" else rel_path
+        report["required_files_present"][key] = task_entry_exists(task_dir, rel_path, kind)
+
+    routing_path = task_dir / "routing.json"
+    if routing_path.exists():
+        try:
+            routing = json_load(routing_path)
+            report["routing_ready"] = bool(routing.get("route_phase")) and routing.get("route_phase") != "unrouted"
+            report["route_phase"] = routing.get("route_phase")
+            report["delegation_mode"] = routing.get("delegation_mode")
+            planned_dispatches = routing.get("planned_dispatches", [])
+            report["planned_dispatch_count"] = len(planned_dispatches) if isinstance(planned_dispatches, list) else 0
+        except Exception as exc:
+            report["route_phase"] = f"PARSE_ERROR: {exc}"
 
     evidence_path = task_dir / "evidence.json"
     if evidence_path.exists():
@@ -603,6 +1088,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     init_parser.add_argument("--force", action="store_true", help="Overwrite existing task artifact templates.")
     init_parser.set_defaults(func=cmd_init)
+
+    route_parser = subparsers.add_parser("route", help="Produce or refresh durable routing state for a task.")
+    route_parser.add_argument("--task-id", required=True, help="Task identifier to route.")
+    route_parser.add_argument("--repo-root", help="Optional working directory inside the repo. Defaults to the current directory.")
+    route_parser.add_argument(
+        "--phase",
+        choices=sorted(ROUTE_PHASE_CHOICES),
+        default="auto",
+        help="Routing pass to run. auto infers pre-freeze vs post-freeze from spec.md.",
+    )
+    route_parser.set_defaults(func=cmd_route)
 
     validate_parser = subparsers.add_parser("validate", help="Validate required task files and JSON structures.")
     validate_parser.add_argument("--task-id", required=True, help="Task identifier to validate.")

@@ -1,6 +1,6 @@
 ---
 name: repo-task-proof-loop
-description: Repo-local proof-loop skill for large coding tasks. Initializes .agent/tasks/TASK_ID artifacts, installs Codex subagents by default, optionally installs Claude compatibility files when explicitly requested, updates repo guidance, and runs a spec-freeze → build → evidence → verify → fix loop with fresh-session verification.
+description: Repo-local proof-loop skill for large coding tasks. Initializes durable task artifacts, routes from repo-local task state, installs Codex subagents by default, optionally installs Claude compatibility files when explicitly requested, updates repo guidance, and runs a route → freeze → route → build → evidence → verify → fix loop with fresh-session verification.
 license: Apache-2.0
 compatibility: Skills-compatible coding agents. Maintained for Codex-first project-scoped subagents, with optional Claude compatibility surfaces when explicitly requested. Bundled scripts require Python 3.10+.
 metadata:
@@ -23,9 +23,12 @@ When the examples below mention `scripts/task_loop.py`, that path is relative to
 1. Initializes a strict repo-local task folder under `.agent/tasks/<TASK_ID>/`
 2. Seeds or updates the required artifact files
 3. Installs project-scoped Codex subagent templates by default into `.codex/agents/` and, only when explicitly requested, Claude compatibility files into `.claude/agents/`
-4. Updates the matching repo guide files with a managed block that explains the workflow
-5. Guides the agent through a strict loop:
+4. Writes and refreshes durable routing state in `.agent/tasks/<TASK_ID>/routing.json` plus scoped child briefs under `.agent/tasks/<TASK_ID>/dispatches/`
+5. Updates the matching repo guide files with a managed block that explains the workflow
+6. Guides the agent through a strict loop:
+   - route
    - spec freeze
+   - route
    - builder implementation
    - evidence packing
    - fresh verification
@@ -43,6 +46,7 @@ See:
 Treat the following words as commands when the user invokes this skill:
 
 - `init <TASK_ID>`: create `.agent/tasks/<TASK_ID>/`, install or refresh the selected subagent templates, and update the matching guide files
+- `route <TASK_ID>`: read the current task artifacts, write `routing.json`, and emit scoped dispatch briefs for the next task phase
 - `freeze <TASK_ID>`: create or refine `spec.md` from the user task, task file, and repo guidance
 - `build <TASK_ID>`: implement the task against the frozen spec
 - `evidence <TASK_ID>`: create or refresh `evidence.md`, `evidence.json`, and raw artifacts without changing production code
@@ -52,8 +56,10 @@ Treat the following words as commands when the user invokes this skill:
 - `status <TASK_ID>`: summarize current artifact status
 
 If the user does not supply a command, infer the next step from repo state:
-- If the task folder does not exist, run `init` first. If the user clearly wants initialization only, stop there. Otherwise, after `init` succeeds and `.agent/tasks/<TASK_ID>/spec.md` exists, continue by re-evaluating repo state in the same turn. Do not overlap `init` with `freeze`, `build`, `evidence`, `verify`, `fix`, `validate`, `status`, or subagent work.
+- If the task folder does not exist, run `init` first. If the user clearly wants initialization only, stop there. Otherwise, after `init` succeeds, continue by re-evaluating repo state in the same turn. Do not overlap `init` with `route`, `freeze`, `build`, `evidence`, `verify`, `fix`, `validate`, `status`, or subagent work.
+- If `routing.json` is missing, unrouted, or stale for the current phase, do `route`
 - If `spec.md` is missing or placeholder-only, do `freeze`
+- If `spec.md` just became frozen, do `route` again before write-capable implementation work
 - If implementation is not yet complete, do `build`
 - If evidence is stale or missing, do `evidence`
 - If no fresh verdict exists, do `verify`
@@ -89,26 +95,41 @@ If you explicitly enable Claude compatibility, the initializer keeps its managed
 
 In Claude Code, if `init` just wrote or refreshed `.claude/agents/*` during the current session, do not assume those updated agents are already available mid-session.
 
-Treat `init` as a serial prerequisite. Never overlap it with `freeze`, `build`, `evidence`, `verify`, `fix`, `validate`, `status`, or child-agent spawning.
+Treat `init` as a serial prerequisite. Never overlap it with `route`, `freeze`, `build`, `evidence`, `verify`, `fix`, `validate`, `status`, or child-agent spawning.
+
+## Routing step
+
+Run the durable router after `init` and again after the spec is frozen:
+
+```bash
+scripts/task_loop.py route --task-id <TASK_ID>
+```
+
+Routing rules:
+
+- Before the spec is frozen, routing may only choose `serial`, `task-scout`, or `task-explorer`.
+- After the spec is frozen, routing may emit `task-builder`, `task-worker-lite`, or `task-worker-strong` dispatches scoped to explicit ACs.
+- Child work should follow `routing.json` plus the matching dispatch brief instead of assuming a full raw parent chat handoff.
+- Prefer the smallest valid decomposition, state assumptions explicitly, and avoid speculative parallelism.
 
 ## Heavy-task default workflow
 
-For large tasks, keep the user-facing request simple. In Codex, continue serially unless the user explicitly asks for delegation or parallel agent work; after that authorization, the skill can choose the internal child setup automatically when the current product surface supports delegation and the task shape warrants it.
+For large tasks, keep the user-facing request simple. In Codex, the skill should route first and then choose the smallest valid child setup automatically from repo-local task state.
 
 ### Preferred delegated sequence
 
-1. Run `init <TASK_ID>` if needed. Wait for it to finish, then confirm `.agent/tasks/<TASK_ID>/spec.md` and the repo-local task structure exist before continuing.
-2. Only after `init` completes, spawn exactly one spec-freezer subagent and wait for it
-3. Spawn exactly one builder subagent and let it implement
-4. Continue with the same builder session for evidence packing
-5. Spawn exactly one fresh verifier subagent and wait for it
-6. If verdict is not `PASS`, spawn exactly one fixer subagent
-7. Spawn one fresh verifier subagent again
-8. Repeat steps 6-7 until the verifier returns `PASS` or the user stops the loop
+1. Run `init <TASK_ID>` if needed. Wait for it to finish, then confirm `.agent/tasks/<TASK_ID>/spec.md`, `routing.json`, and the repo-local task structure exist before continuing.
+2. Run `route <TASK_ID>` and use the route result to decide whether read-only discovery children are necessary before spec freeze.
+3. Spawn exactly one spec-freezer subagent and wait for it.
+4. Run `route <TASK_ID>` again from the frozen spec.
+5. Spawn exactly one builder subagent as the integration owner, plus any bounded worker shards that the route result explicitly scheduled.
+6. Continue with the same builder session for evidence packing.
+7. Spawn exactly one fresh verifier subagent and wait for it.
+8. If verdict is not `PASS`, spawn exactly one fixer subagent, refresh evidence, and verify again.
 
 ### Codex adaptive fan-out
 
-Use this only after the user has explicitly authorized Codex delegation and the task is broad enough to benefit from bounded parallel work. Use the simpler serial sequence above for narrow tasks.
+Use this when the route result explicitly chooses bounded fan-out. Use the simpler serial sequence above when routing says `serial`.
 
 Good fits:
 
@@ -119,9 +140,10 @@ Good fits:
 Codex pattern:
 
 1. `init` stays serial.
-2. If the task is still ambiguous, fan out up to 3 `task-scout` or `task-explorer` children in parallel. Give each one a single question, subsystem, or path scope. Use built-in `explorer` only as fallback when the task-specific helper roles are unavailable in the current product surface. Wait for them, then freeze the spec.
+2. Before spec freeze, use `routing.json` to decide whether to fan out up to 3 `task-scout` or `task-explorer` children in parallel. Give each one a single question, subsystem, or path scope from its dispatch brief. Use built-in `explorer` only as fallback when the task-specific helper roles are unavailable in the current product surface. Wait for them, then freeze the spec.
 3. Spawn one spec-freezer child and wait for it.
-4. Spawn one `task-builder` child as the integration owner.
+4. Route again from the frozen spec.
+5. Spawn one `task-builder` child as the integration owner.
 5. If implementation splits cleanly, the parent may also spawn bounded helper children in parallel. Prefer `task-scout` for cheap lookup work, `task-explorer` for deeper read-only tracing, `task-worker-lite` for one-file or tightly bounded low-risk edits, and `task-worker-strong` for bounded multi-file or ambiguity-prone edits. Use built-in `worker` only as fallback when the task-specific write-capable helper roles are unavailable in the current product surface. Each worker-style helper must have explicit file or module ownership and must not write `evidence.md`, `evidence.json`, `verdict.json`, or `problems.md`.
 6. Use `send_input` or the equivalent follow-up surface to keep the integration builder alive for evidence packing. The builder remains the single owner of the evidence bundle.
 7. If extra proof is needed, the parent may fan out a small bounded set of read-only helpers to rerun disjoint checks or inspect separate proof gaps in parallel. Prefer `task-scout` when the question is just “where” or “which file,” and `task-explorer` when the question is “why” or “what real execution path or contract is involved.” Those children may report commands, outputs, and findings, but they do not write `verdict.json`.
@@ -129,17 +151,16 @@ Codex pattern:
 
 ### Platform behavior
 
-- In Codex, keep the normal path serial and auto-mode-first after `init`. Avoid surfacing delegation internals unless they materially affect the work.
-- In Codex, spawn bounded subagents only when the user explicitly asks for sub-agents, delegation, or parallel agent work.
-- In Codex, once delegation is authorized, the skill may choose the matching child roles and whether to stay one-child-at-a-time or use bounded fan-out. The user should not need to name specific child roles or slash commands.
+- In Codex, treat skill invocation as authorization for bounded child orchestration inside this workflow, but stay serial when routing says delegation is unnecessary.
+- In Codex, the user should not need to name specific child roles or slash commands. The route result should choose the smallest valid child setup automatically.
 - In Codex, child spawning is still an explicit parent-orchestrator action. If the current Codex surface blocks delegation, say so briefly only when it materially affects the work, then continue serially.
 - In Codex, keep the task tree shallow. The parent session should spawn research, builder, fixer, and verifier children directly instead of asking one custom task child to orchestrate more children.
-- In Codex, once delegation is authorized, choose between one-child-at-a-time delegation and bounded fan-out from the frozen spec, repo shape, and current delegation surface. Keep `init`, evidence ownership, and every verifier pass serialized either way.
+- In Codex, choose between one-child-at-a-time delegation and bounded fan-out from the current `routing.json`, frozen spec, repo shape, and current delegation surface. Keep `init`, evidence ownership, and every verifier pass serialized either way.
 - In Codex, keep helper fan-out modest and wave-based. Prefer up to 3 parallel helper children at once, wait for that wave to finish, then decide the next phase.
 - In Codex, the installed task-specific helper roles are the default delegated path. Built-in `explorer` and `worker` are fallback only when the task-specific roles are unavailable in the current product surface.
 - In Codex, reuse the live builder child for evidence packing by sending it a follow-up instruction. Verifier passes must use a fresh child or fresh session; do not satisfy verifier freshness by resuming an earlier verifier. Builder and fixer children can be reused or resumed when you intentionally want that context back.
 - In Codex, keep `task-builder` inheritance-first so the parent session controls implementation depth.
-- In Codex, helper routing should be deliberate and cost-aware. Use `task-scout` for cheap read-only lookup work, `task-explorer` for deeper read-only tracing, `task-worker-lite` for narrow low-risk edits, and `task-worker-strong` for bounded but riskier implementation work. Keep inherited parent strength on the integration owner.
+- In Codex, helper routing should be deliberate and cost-aware. Keep `task-router` on route decisions and scoped dispatch briefs; use `task-scout` for cheap read-only lookup work, `task-explorer` for deeper read-only tracing, `task-worker-lite` for narrow low-risk edits, and `task-worker-strong` for bounded but riskier implementation work. Keep inherited parent strength on the integration owner.
 - In Codex, inspect the current child-thread list before reusing or resuming a child. Use `/agent` in Codex CLI or any equivalent child-thread inventory surface available in the current Codex product surface.
 - In Codex, the plan/todo checklist UI from `update_plan` is optional session guidance only. It is useful for live progress display, but it is not the source of truth for this workflow.
 - In Claude Code, the skill should decide whether to stay on the main thread or let the main Claude session auto-delegate the current phase to a matching built-in or project subagent after `init`. The user should not need to request a specific Claude subagent or delegation mode separately.

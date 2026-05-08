@@ -31,7 +31,6 @@ def parse_frontmatter(path: Path) -> tuple[dict[str, str], str]:
             data[key.strip()] = value.strip().strip('"')
             current_key = key.strip()
         elif current_key and line.startswith("  "):
-            # Ignore nested metadata content for this smoke test.
             continue
     return data, body
 
@@ -40,49 +39,53 @@ def run(cmd: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
     return subprocess.run(cmd, cwd=cwd, check=True, text=True, capture_output=True)
 
 
+def run_no_check(cmd: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(cmd, cwd=cwd, check=False, text=True, capture_output=True)
+
+
+def route_json(path: Path) -> dict[str, object]:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def write_text(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+
+
 def main() -> int:
     skill_root = Path(__file__).resolve().parent.parent
     skill_md = skill_root / "SKILL.md"
     task_loop = skill_root / "scripts" / "task_loop.py"
-    codex_wording_files = [
-        skill_root / "SKILL.md",
+
+    docs_to_check = [
         skill_root / "README.md",
+        skill_root / "SKILL.md",
         skill_root / "references" / "REFERENCE.md",
         skill_root / "references" / "SUBAGENTS.md",
         skill_root / "references" / "COMMANDS.md",
+        skill_root / "references" / "SCHEMAS.md",
+        skill_root / "agents" / "openai.yaml",
+        skill_root / "assets" / "templates" / "managed-block-agents.md.tmpl",
     ]
 
     frontmatter, body = parse_frontmatter(skill_md)
     missing = sorted(REQUIRED_FRONTMATTER_KEYS - set(frontmatter.keys()))
     if missing:
         raise SystemExit(f"SKILL.md frontmatter missing keys: {', '.join(missing)}")
-
     if frontmatter["name"] != skill_root.name:
         raise SystemExit("SKILL.md name must match the parent directory name.")
-
     if not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", frontmatter["name"]):
         raise SystemExit("SKILL.md name does not match the allowed skill-name pattern.")
-
     if not body.strip():
         raise SystemExit("SKILL.md body must not be empty.")
 
-    for path in codex_wording_files:
+    for path in docs_to_check:
         content = path.read_text(encoding="utf-8")
-        if "list_agents" in content:
-            raise SystemExit(f"Codex-facing wording should prefer public child-thread inventory surfaces over raw list_agents mentions: {path}")
-        if "automatic bounded fan-out" in content or "without waiting for a separate user request" in content:
-            raise SystemExit(f"Codex-facing wording should not claim automatic Codex child spawning without explicit user authorization: {path}")
-        if "Users should not need to request subagents" in content or "user should not need to request subagents" in content:
-            raise SystemExit(f"Codex-facing wording should not imply that Codex child spawning requires no explicit user authorization: {path}")
+        if "route <TASK_ID>" not in content and "routing.json" not in content:
+            raise SystemExit(f"Expected router-v2 documentation markers in {path}")
 
-    if "up to 3 `task-scout` or `task-explorer` children" not in body:
-        raise SystemExit("SKILL.md should cap the default Codex read-only helper fan-out wording at up to 3 parallel helpers.")
-    if "validate`, `status`" not in body:
-        raise SystemExit("SKILL.md should explicitly serialize validate and status after init.")
-    if "explicitly asks for delegation or parallel agent work" not in body:
-        raise SystemExit("SKILL.md should state that Codex child spawning requires explicit user authorization for delegation or parallel agent work.")
-    if "The user should not need to name specific child roles or slash commands." not in body:
-        raise SystemExit("SKILL.md should keep the Codex UX simple even when delegation is authorized.")
+    if "task-router" not in body or "routing.json" not in body:
+        raise SystemExit("SKILL.md should describe task-router and durable routing state.")
 
     with tempfile.TemporaryDirectory(prefix="repo-task-proof-loop-") as tmp_dir:
         repo = Path(tmp_dir) / "demo-repo"
@@ -105,26 +108,12 @@ def main() -> int:
             ],
             repo,
         )
-        validate_result = subprocess.run(
-            [
-                sys.executable,
-                str(task_loop),
-                "validate",
-                "--task-id",
-                "demo-task",
-            ],
-            cwd=repo,
-            text=True,
-            capture_output=True,
+        validate_result = run_no_check(
+            [sys.executable, str(task_loop), "validate", "--task-id", "demo-task"],
+            repo,
         )
         status_result = run(
-            [
-                sys.executable,
-                str(task_loop),
-                "status",
-                "--task-id",
-                "demo-task",
-            ],
+            [sys.executable, str(task_loop), "status", "--task-id", "demo-task"],
             repo,
         )
 
@@ -134,26 +123,12 @@ def main() -> int:
 
         init_sentinel = repo / ".agent" / "tasks" / "demo-task" / ".init-in-progress"
         init_sentinel.write_text("smoke-test-init-in-progress\n", encoding="utf-8")
-        race_validate_result = subprocess.run(
-            [
-                sys.executable,
-                str(task_loop),
-                "validate",
-                "--task-id",
-                "demo-task",
-            ],
-            cwd=repo,
-            text=True,
-            capture_output=True,
+        race_validate_result = run_no_check(
+            [sys.executable, str(task_loop), "validate", "--task-id", "demo-task"],
+            repo,
         )
         race_status_result = run(
-            [
-                sys.executable,
-                str(task_loop),
-                "status",
-                "--task-id",
-                "demo-task",
-            ],
+            [sys.executable, str(task_loop), "status", "--task-id", "demo-task"],
             repo,
         )
         init_sentinel.unlink()
@@ -171,32 +146,12 @@ def main() -> int:
 
         required_paths = [
             repo / ".agent" / "tasks" / "demo-task" / "spec.md",
+            repo / ".agent" / "tasks" / "demo-task" / "routing.json",
+            repo / ".agent" / "tasks" / "demo-task" / "dispatches",
             repo / ".agent" / "tasks" / "demo-task" / "evidence.json",
             repo / ".agent" / "tasks" / "demo-task" / "verdict.json",
             repo / ".agent" / "tasks" / "demo-task" / "raw" / "screenshot-1.png",
-            repo / ".codex" / "agents" / "task-spec-freezer.toml",
-            repo / ".codex" / "agents" / "task-scout.toml",
-            repo / ".codex" / "agents" / "task-explorer.toml",
-            repo / ".codex" / "agents" / "task-builder.toml",
-            repo / ".codex" / "agents" / "task-worker-lite.toml",
-            repo / ".codex" / "agents" / "task-worker-strong.toml",
-            repo / ".claude" / "agents" / "task-spec-freezer.md",
-            repo / "AGENTS.md",
-            repo / "CLAUDE.md",
-        ]
-        for path in required_paths:
-            if not path.exists():
-                raise SystemExit(f"Expected path missing after init: {path}")
-
-        forbidden_paths = [
-            repo / ".codex" / "agents" / "task-builder-medium.toml",
-            repo / ".codex" / "agents" / "task-builder-high.toml",
-        ]
-        for path in forbidden_paths:
-            if path.exists():
-                raise SystemExit(f"Unexpected legacy builder-tier file present after init: {path}")
-
-        codex_agent_files = [
+            repo / ".codex" / "agents" / "task-router.toml",
             repo / ".codex" / "agents" / "task-spec-freezer.toml",
             repo / ".codex" / "agents" / "task-scout.toml",
             repo / ".codex" / "agents" / "task-explorer.toml",
@@ -205,24 +160,24 @@ def main() -> int:
             repo / ".codex" / "agents" / "task-worker-strong.toml",
             repo / ".codex" / "agents" / "task-verifier.toml",
             repo / ".codex" / "agents" / "task-fixer.toml",
+            repo / ".claude" / "agents" / "task-spec-freezer.md",
+            repo / "AGENTS.md",
+            repo / "CLAUDE.md",
         ]
-        for path in codex_agent_files:
-            content = path.read_text(encoding="utf-8")
-            if "CLAUDE.md" in content:
-                raise SystemExit(f"Codex agent template should not mention CLAUDE.md: {path}")
+        for path in required_paths:
+            if not path.exists():
+                raise SystemExit(f"Expected path missing after init: {path}")
 
         managed_agents = (repo / "AGENTS.md").read_text(encoding="utf-8")
-        if "task-scout" not in managed_agents or "task-worker-strong" not in managed_agents:
-            raise SystemExit("Expected generated AGENTS.md managed block to mention task-specific helper-role fan-out guidance.")
-        if "read-only discovery and proof probes" not in managed_agents or "only after the spec is frozen" not in managed_agents:
-            raise SystemExit("Expected generated AGENTS.md managed block to distinguish read-only helper timing from post-freeze worker timing.")
-        if "explicitly asked for delegation or parallel agent work" not in managed_agents:
-            raise SystemExit("Expected generated AGENTS.md managed block to require explicit user authorization before Codex fan-out.")
-        if "fallback when the task-specific roles are unavailable" not in managed_agents:
-            raise SystemExit("Expected generated AGENTS.md managed block to demote built-in helpers to fallback-only guidance.")
-        if "task-scout.toml" not in managed_agents or "task-worker-strong.toml" not in managed_agents:
-            raise SystemExit("Expected generated AGENTS.md managed block to list the installed helper roles.")
+        if "routing.json" not in managed_agents or "task-router.toml" not in managed_agents:
+            raise SystemExit("Expected generated AGENTS.md managed block to mention routing.json and task-router.")
 
+        generated_router = (repo / ".codex" / "agents" / "task-router.toml").read_text(encoding="utf-8")
+        if 'model = "gpt-5.5"' not in generated_router or 'model_reasoning_effort = "medium"' not in generated_router:
+            raise SystemExit("Expected generated Codex task-router template to pin gpt-5.5 at medium reasoning.")
+        generated_spec_freezer = (repo / ".codex" / "agents" / "task-spec-freezer.toml").read_text(encoding="utf-8")
+        if 'model = "gpt-5.5"' not in generated_spec_freezer or 'model_reasoning_effort = "low"' not in generated_spec_freezer:
+            raise SystemExit("Expected generated Codex task-spec-freezer template to pin gpt-5.5 at low reasoning.")
         generated_builder = (repo / ".codex" / "agents" / "task-builder.toml").read_text(encoding="utf-8")
         if "integration owner" not in generated_builder:
             raise SystemExit("Expected generated Codex task-builder template to describe the integration-owner role.")
@@ -240,50 +195,152 @@ def main() -> int:
         generated_worker_strong = (repo / ".codex" / "agents" / "task-worker-strong.toml").read_text(encoding="utf-8")
         if 'model = "gpt-5.4"' not in generated_worker_strong or 'model_reasoning_effort = "high"' not in generated_worker_strong:
             raise SystemExit("Expected generated Codex task-worker-strong template to pin gpt-5.4 at high reasoning.")
+        generated_verifier = (repo / ".codex" / "agents" / "task-verifier.toml").read_text(encoding="utf-8")
+        if 'model = "gpt-5.5"' not in generated_verifier or 'model_reasoning_effort = "medium"' not in generated_verifier:
+            raise SystemExit("Expected generated Codex task-verifier template to pin gpt-5.5 at medium reasoning.")
 
-        commands_reference = (skill_root / "references" / "COMMANDS.md").read_text(encoding="utf-8")
-        if "Codex adaptive fan-out path" not in commands_reference:
-            raise SystemExit("Expected COMMANDS.md to document the Codex adaptive fan-out orchestration path.")
-        if "`/agent`" not in commands_reference or "child-thread inventory" not in commands_reference:
-            raise SystemExit("Expected COMMANDS.md to mention public child-thread inventory guidance for Codex child reuse.")
-        if "up to 3 `task-scout` or `task-explorer` children" not in commands_reference:
-            raise SystemExit("Expected COMMANDS.md to cap the default Codex read-only helper fan-out wording at up to 3 parallel helpers.")
-        if "fallback when the task-specific helper roles are unavailable in the current product surface" not in commands_reference:
-            raise SystemExit("Expected COMMANDS.md to document built-in explorer/worker as fallback-only roles.")
-        if "Spawn one built-in `explorer` child for TASK_ID <TASK_ID> only because" not in commands_reference or "Spawn one built-in `worker` child for TASK_ID <TASK_ID> only because" not in commands_reference:
-            raise SystemExit("Expected COMMANDS.md to provide fallback-only prompts for built-in explorer and worker roles.")
-        if "Spawn one `task-scout` child" not in commands_reference or "Spawn one `task-worker-strong` child" not in commands_reference:
-            raise SystemExit("Expected COMMANDS.md to provide first-class prompts for the installed helper roles.")
-        if "Do not run `status` or `validate` in parallel with `init`" not in commands_reference:
-            raise SystemExit("Expected COMMANDS.md to document that validate and status must not race init.")
-        if "only after Codex delegation is explicitly authorized by the user" not in commands_reference:
-            raise SystemExit("Expected COMMANDS.md to require explicit user authorization before Codex adaptive helpers are used.")
+        pre_route_result = run(
+            [sys.executable, str(task_loop), "route", "--task-id", "demo-task", "--phase", "auto"],
+            repo,
+        )
+        pre_route_json = json.loads(pre_route_result.stdout)
+        if pre_route_json.get("route_phase") != "pre-freeze":
+            raise SystemExit("Expected initial route call to choose pre-freeze.")
+        routed_data = route_json(repo / ".agent" / "tasks" / "demo-task" / "routing.json")
+        if routed_data["route_phase"] != "pre-freeze":
+            raise SystemExit("Expected routing.json to record a pre-freeze route phase.")
+        if any(dispatch["role"] in {"task-builder", "task-worker-lite", "task-worker-strong"} for dispatch in routed_data["planned_dispatches"]):
+            raise SystemExit("Pre-freeze route must not schedule write-capable roles.")
 
-        readme = (skill_root / "README.md").read_text(encoding="utf-8")
-        if "Do not run `validate` or `status` in parallel with `init`." not in readme:
-            raise SystemExit("Expected README.md to document that validate and status must not race init.")
-        if "explicitly authorized to use subagents and bounded parallel helper work" not in readme:
-            raise SystemExit("Expected README.md to carry explicit delegation authorization inside the Do Task prompt.")
-        if "Do Task" not in readme:
-            raise SystemExit("Expected README.md to expose the slim Do Task prompt surface.")
-        if "initialize it first and then continue automatically after init completes" not in readme:
-            raise SystemExit("Expected README.md to make Do Task the init-if-needed end-to-end path.")
+        ambiguous_spec = """# Task Spec: demo-task
 
-        reference = (skill_root / "references" / "REFERENCE.md").read_text(encoding="utf-8")
-        if "init_in_progress: true" not in reference:
-            raise SystemExit("Expected REFERENCE.md to explain the retry-later init_in_progress status signal.")
-        if "Only after the user has explicitly asked for sub-agents, delegation, or parallel agent work" not in reference:
-            raise SystemExit("Expected REFERENCE.md to require explicit user authorization before Codex bounded fan-out.")
+## Metadata
+- Task ID: demo-task
 
-        skill_prompt = (skill_root / "agents" / "openai.yaml").read_text(encoding="utf-8")
-        if "Do not run validate or status until init has fully finished." not in skill_prompt:
-            raise SystemExit("Expected Codex default prompt metadata to serialize validate/status after init.")
-        if "task-scout" not in skill_prompt or "task-worker-strong" not in skill_prompt:
-            raise SystemExit("Expected Codex default prompt metadata to route work across the installed helper roles.")
-        if "user explicitly asks for sub-agents, delegation, or parallel agent work" not in skill_prompt:
-            raise SystemExit("Expected Codex default prompt metadata to require explicit user authorization before child spawning.")
-        if "fallback when those task-specific roles are unavailable in the current product surface" not in skill_prompt:
-            raise SystemExit("Expected Codex default prompt metadata to demote built-in explorer/worker to fallback-only guidance.")
+## Guidance sources
+- AGENTS.md
+
+## Original task statement
+Map which files matter and explain why routing drifts before the spec is frozen.
+
+## Acceptance criteria
+- AC1: TODO
+
+## Constraints
+- TODO
+
+## Non-goals
+- TODO
+
+## Verification plan
+- TODO
+"""
+        write_text(repo / ".agent" / "tasks" / "demo-task" / "spec.md", ambiguous_spec)
+        ambiguous_route_result = run(
+            [sys.executable, str(task_loop), "route", "--task-id", "demo-task", "--phase", "pre-freeze"],
+            repo,
+        )
+        ambiguous_route_json = json.loads(ambiguous_route_result.stdout)
+        if ambiguous_route_json.get("delegation_mode") != "discovery_fanout":
+            raise SystemExit("Expected ambiguous pre-freeze route to choose discovery_fanout.")
+        ambiguous_routing_data = route_json(repo / ".agent" / "tasks" / "demo-task" / "routing.json")
+        roles = {dispatch["role"] for dispatch in ambiguous_routing_data["planned_dispatches"]}
+        if not roles or not roles.issubset({"task-scout", "task-explorer"}):
+            raise SystemExit("Expected ambiguous pre-freeze route to schedule only task-scout/task-explorer.")
+        for dispatch in ambiguous_routing_data["planned_dispatches"]:
+            brief = repo / ".agent" / "tasks" / "demo-task" / "dispatches" / f"{dispatch['dispatch_id']}.md"
+            if not brief.exists():
+                raise SystemExit(f"Expected dispatch brief missing after route: {brief}")
+
+        frozen_spec = """# Task Spec: demo-task
+
+## Metadata
+- Task ID: demo-task
+
+## Guidance sources
+- AGENTS.md
+
+## Original task statement
+Implement a multi-file router refactor with explicit AC ownership hints.
+
+## Acceptance criteria
+- AC1: Add the route CLI and durable routing artifacts.
+  - Allowed paths: scripts/task_loop.py, assets/templates/routing.json.tmpl
+  - No-touch paths: README.md
+- AC2: Add router docs and prompt metadata.
+  - Allowed paths: SKILL.md, references/COMMANDS.md, agents/openai.yaml
+  - No-touch paths: scripts/task_loop.py
+
+## Constraints
+- Keep all workflow state inside .agent/tasks/<TASK_ID>/.
+
+## Non-goals
+- Do not change Claude compatibility runtime behavior.
+
+## Verification plan
+- Build: run smoke tests.
+- Unit tests: verify route behavior.
+- Integration tests: inspect routing.json and dispatch briefs.
+- Lint: keep syntax valid.
+- Manual checks: inspect generated agents and docs.
+"""
+        write_text(repo / ".agent" / "tasks" / "demo-task" / "spec.md", frozen_spec)
+        post_route_result = run(
+            [sys.executable, str(task_loop), "route", "--task-id", "demo-task", "--phase", "auto"],
+            repo,
+        )
+        post_route_json = json.loads(post_route_result.stdout)
+        if post_route_json.get("route_phase") != "post-freeze":
+            raise SystemExit("Expected frozen-spec route call to choose post-freeze.")
+        if post_route_json.get("delegation_mode") != "implementation_fanout":
+            raise SystemExit("Expected frozen multi-file route to choose implementation_fanout.")
+        post_routing_data = route_json(repo / ".agent" / "tasks" / "demo-task" / "routing.json")
+        dispatch_roles = [dispatch["role"] for dispatch in post_routing_data["planned_dispatches"]]
+        if "task-builder" not in dispatch_roles:
+            raise SystemExit("Expected post-freeze route to keep a task-builder integration owner.")
+        if not any(role in {"task-worker-lite", "task-worker-strong"} for role in dispatch_roles):
+            raise SystemExit("Expected post-freeze route to emit worker shards for AC ownership hints.")
+        worker_allowed_paths = [
+            tuple(dispatch["allowed_paths"])
+            for dispatch in post_routing_data["planned_dispatches"]
+            if dispatch["role"] in {"task-worker-lite", "task-worker-strong"}
+        ]
+        if len(worker_allowed_paths) != len(set(worker_allowed_paths)):
+            raise SystemExit("Expected worker shard allowed path sets to stay non-overlapping in the smoke test.")
+        for dispatch in post_routing_data["planned_dispatches"]:
+            brief = repo / ".agent" / "tasks" / "demo-task" / "dispatches" / f"{dispatch['dispatch_id']}.md"
+            if not brief.exists():
+                raise SystemExit(f"Expected post-freeze dispatch brief missing: {brief}")
+
+        status_after_route = json.loads(
+            run([sys.executable, str(task_loop), "status", "--task-id", "demo-task"], repo).stdout
+        )
+        if status_after_route.get("route_phase") != "post-freeze":
+            raise SystemExit("Expected status to report the current route phase.")
+        if status_after_route.get("delegation_mode") != "implementation_fanout":
+            raise SystemExit("Expected status to report the current delegation mode.")
+        if status_after_route.get("planned_dispatch_count", 0) < 2:
+            raise SystemExit("Expected status to report planned dispatches after route.")
+
+        malformed_routing = {
+            "task_id": "demo-task",
+            "policy_version": "router-v2",
+            "route_phase": "pre-freeze",
+            "delegation_mode": "implementation_fanout",
+        }
+        write_text(
+            repo / ".agent" / "tasks" / "demo-task" / "routing.json",
+            json.dumps(malformed_routing, indent=2) + "\n",
+        )
+        malformed_validate = run_no_check(
+            [sys.executable, str(task_loop), "validate", "--task-id", "demo-task"],
+            repo,
+        )
+        malformed_validate_json = json.loads(malformed_validate.stdout)
+        if malformed_validate.returncode == 0:
+            raise SystemExit("Expected validate to fail on malformed routing.json.")
+        if not any("routing.json" in error for error in malformed_validate_json.get("errors", [])):
+            raise SystemExit("Expected validate to report routing.json errors for malformed routing state.")
 
         claude_auto_repo = Path(tmp_dir) / "claude-auto-repo"
         claude_auto_repo.mkdir(parents=True)
@@ -348,8 +405,8 @@ def main() -> int:
         )
         if not (codex_default_repo / "AGENTS.md").exists():
             raise SystemExit("Expected AGENTS.md to be created by default Codex-only init.")
-        if not (codex_default_repo / ".codex" / "agents" / "task-builder.toml").exists():
-            raise SystemExit("Expected default Codex-only init to install Codex agents.")
+        if not (codex_default_repo / ".codex" / "agents" / "task-router.toml").exists():
+            raise SystemExit("Expected default Codex-only init to install task-router.")
         if (codex_default_repo / "CLAUDE.md").exists() or (codex_default_repo / ".claude" / "agents").exists():
             raise SystemExit("Did not expect Claude guide or agents from default Codex-only init.")
 
@@ -390,53 +447,48 @@ def main() -> int:
         if rule_marker not in guidance_spec:
             raise SystemExit("Expected seeded guidance to include nested .claude/rules/**/*.md files.")
 
-        print(json.dumps(
-            {
-                "skill_root": str(skill_root),
-                "frontmatter_name": frontmatter["name"],
-                "init_stdout": json.loads(init_result.stdout),
-                "validate_stdout": validate_json,
-                "status_stdout": json.loads(status_result.stdout),
-                "init_race_checks": {
-                    "validate_reports_init_in_progress": race_validate_json.get("init_in_progress") is True,
-                    "validate_reports_still_in_progress_error": any(
-                        "still in progress" in error for error in race_validate_json.get("errors", [])
-                    ),
-                    "status_reports_init_in_progress": race_status_json.get("init_in_progress") is True,
+        print(
+            json.dumps(
+                {
+                    "skill_root": str(skill_root),
+                    "frontmatter_name": frontmatter["name"],
+                    "init_stdout": json.loads(init_result.stdout),
+                    "validate_stdout": validate_json,
+                    "status_stdout": json.loads(status_result.stdout),
+                    "init_race_checks": {
+                        "validate_reports_init_in_progress": race_validate_json.get("init_in_progress") is True,
+                        "validate_reports_still_in_progress_error": any(
+                            "still in progress" in error for error in race_validate_json.get("errors", [])
+                        ),
+                        "status_reports_init_in_progress": race_status_json.get("init_in_progress") is True,
+                    },
+                    "route_checks": {
+                        "pre_freeze_phase": pre_route_json.get("route_phase"),
+                        "ambiguous_pre_freeze_mode": ambiguous_route_json.get("delegation_mode"),
+                        "post_freeze_mode": post_route_json.get("delegation_mode"),
+                        "post_freeze_dispatch_roles": dispatch_roles,
+                    },
+                    "claude_auto_guides": {
+                        "agents_md": str(claude_auto_repo / "AGENTS.md"),
+                        "claude_md": str(claude_auto_repo / "CLAUDE.md"),
+                    },
+                    "codex_auto_guides": {
+                        "agents_md": str(codex_auto_repo / "AGENTS.md"),
+                        "claude_md": str(codex_auto_repo / "CLAUDE.md"),
+                    },
+                    "codex_default_init": {
+                        "agents_md": str(codex_default_repo / "AGENTS.md"),
+                        "has_claude_md": (codex_default_repo / "CLAUDE.md").exists(),
+                    },
+                    "guidance_seed_checks": {
+                        "override_before_agents": True,
+                        "nested_rule_detected": str(nested_rule),
+                    },
+                    "result": "PASS",
                 },
-                "claude_auto_guides": {
-                    "agents_md": str(claude_auto_repo / "AGENTS.md"),
-                    "claude_md": str(claude_auto_repo / "CLAUDE.md"),
-                },
-                "codex_auto_guides": {
-                    "agents_md": str(codex_auto_repo / "AGENTS.md"),
-                    "claude_md": str(codex_auto_repo / "CLAUDE.md"),
-                },
-                "codex_default_init": {
-                    "agents_md": str(codex_default_repo / "AGENTS.md"),
-                    "has_claude_md": (codex_default_repo / "CLAUDE.md").exists(),
-                },
-                "guidance_seed_checks": {
-                    "override_before_agents": True,
-                    "nested_rule_detected": str(nested_rule),
-                },
-                "codex_adaptive_orchestration_checks": {
-                    "managed_agents_mentions_parallel_roles": True,
-                    "managed_agents_distinguishes_explorer_vs_worker_timing": True,
-                    "managed_agents_require_explicit_user_authorization": True,
-                    "builder_mentions_integration_owner": True,
-                    "helper_roles_installed_and_listed": True,
-                    "default_prompt_mentions_parallel_roles": True,
-                    "default_prompt_requires_explicit_user_authorization": True,
-                    "commands_reference_mentions_adaptive_fan_out": True,
-                    "commands_reference_includes_builtin_helper_prompts": True,
-                    "commands_reference_includes_custom_helper_prompts": True,
-                    "readme_keeps_internal_role_selection_simple": True,
-                },
-                "result": "PASS",
-            },
-            indent=2,
-        ))
+                indent=2,
+            )
+        )
     return 0
 
 

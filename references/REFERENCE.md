@@ -35,6 +35,8 @@ Claude Code note:
 ```text
 .agent/tasks/TASK_ID/
   spec.md
+  routing.json
+  dispatches/
   evidence.md
   evidence.json
   raw/
@@ -51,6 +53,7 @@ The initializer also creates or refreshes these project-level integration files:
 
 ```text
 .codex/agents/
+  task-router.toml
   task-spec-freezer.toml
   task-scout.toml
   task-explorer.toml
@@ -124,6 +127,14 @@ scripts/task_loop.py init --task-id my-task --install-subagents claude
 scripts/task_loop.py init --task-id my-task --install-subagents none
 ```
 
+### Route durable child work
+
+```bash
+scripts/task_loop.py route --task-id my-task
+```
+
+Run `route` after `init` and again after the spec is frozen. Before spec freeze it may only choose read-only discovery roles. After spec freeze it may emit implementation dispatches scoped to explicit ACs.
+
 ### Validate the artifact set
 
 ```bash
@@ -143,24 +154,28 @@ Run `status` only after `init` has finished when you need stable task state. If 
 ## Expected working pattern
 
 1. Initialize the task folder
-2. Freeze the spec
-3. Implement
-4. Pack evidence
-5. Fresh verify
-6. Fix if needed
-7. Fresh verify again
+2. Route from repo-local task artifacts
+3. Freeze the spec
+4. Route again from the frozen spec
+5. Implement
+6. Pack evidence
+7. Fresh verify
+8. Fix if needed
+9. Fresh verify again
 
 Codex adaptive orchestration:
 
-- Keep normal Codex usage auto-mode-first and serial by default. Users do not need child-management details unless they explicitly want delegated or parallel agent work.
-- Only after the user has explicitly asked for sub-agents, delegation, or parallel agent work may the parent choose between the serial path above and bounded fan-out from the frozen spec, repo shape, and current delegation surface.
-- Once delegation is authorized, the parent should default to the installed task-specific helper roles for bounded fan-out when a large Codex task has independent research questions, disjoint write scopes, or several read-only proof probes. Use built-in `explorer` or `worker` only as fallback when the task-specific roles are unavailable in the current product surface.
+- Keep normal Codex usage route-first and serial when routing says delegation is unnecessary.
+- Treat skill invocation as authorization for bounded child orchestration inside this workflow, but prefer the smallest valid decomposition.
+- Once routing chooses bounded fan-out, default to the installed task-specific helper roles for bounded work when a large Codex task has independent research questions, disjoint write scopes, or several read-only proof probes. Use built-in `explorer` or `worker` only as fallback when the task-specific roles are unavailable in the current product surface.
 - Keep helper fan-out modest and wave-based. Prefer up to 3 parallel helper children at once, then wait before the next phase.
 - Keep the task tree shallow. The parent session should orchestrate children directly instead of asking one custom task child to spawn more children.
 - One integration builder still owns `evidence.md` and `evidence.json`.
 - One fresh verifier still owns `verdict.json` and `problems.md`.
+- Child work should consume `routing.json` plus dispatch briefs instead of assuming a full raw parent transcript handoff.
 - Keep `task-builder` inheritance-first so the parent session controls implementation depth.
 - Prefer the installed helper roles when you want predictable cost control:
+  - `task-router` -> durable route decisions and scoped dispatch briefs
   - `task-scout` -> cheap read-only lookup work
   - `task-explorer` -> deeper read-only tracing
   - `task-worker-lite` -> narrow low-risk edits

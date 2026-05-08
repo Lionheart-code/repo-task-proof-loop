@@ -14,8 +14,10 @@ Read only:
 
 Behavior:
 - Follow the in-scope Codex project instructions already loaded for this child session.
+- If the parent provides a dispatch brief path or dispatch id, treat that brief plus verifier output as your complete scoped contract.
 - If you move into a deeper directory or outside the parent's current scope, check for more-specific `AGENTS.override.md`, `AGENTS.md`, or configured fallback guide files that apply to the files you inspect or edit.
 - If the parent hands you narrowed findings from sibling helper children or a resumed fixer session, reconfirm them in the current repository before editing.
+- State assumptions explicitly instead of guessing.
 - Reconfirm each listed problem in the codebase before editing.
 - Make the smallest safe change set.
 - Avoid regressing already-passing criteria.

@@ -27,7 +27,7 @@ Repo Task Proof Loop is a repo-local workflow skill for non-trivial coding tasks
 
 It creates a durable task folder under `.agent/tasks/<TASK_ID>/`, installs project-scoped subagents for the active tool profile, updates repo guidance, and drives a strict loop:
 
-`spec freeze -> build -> evidence -> fresh verify -> minimal fix -> fresh verify`
+`route -> spec freeze -> route -> build -> evidence -> fresh verify -> minimal fix -> fresh verify`
 
 For Codex, that loop also supports an adaptive bounded fan-out path for the installed task-specific helper roles, with built-in `explorer` / `worker` kept only as fallback when those roles are unavailable in the current product surface.
 
@@ -42,6 +42,8 @@ Inside the target repository:
 ```text
 .agent/tasks/<TASK_ID>/
   spec.md
+  routing.json
+  dispatches/
   evidence.md
   evidence.json
   raw/
@@ -54,6 +56,7 @@ Inside the target repository:
   problems.md
 
 .codex/agents/
+  task-router.toml
   task-spec-freezer.toml
   task-scout.toml
   task-explorer.toml
@@ -112,7 +115,7 @@ Use this prompt for the normal flow:
 ### Do Task
 
 ```text
-Use $repo-task-proof-loop to do the task described below in this repository. Reuse the matching repo-local task if it already exists; if not, initialize it first and then continue automatically after init completes. You are explicitly authorized to use subagents and bounded parallel helper work when it materially helps.
+Use $repo-task-proof-loop to do the task described below in this repository. Reuse the matching repo-local task if it already exists; if not, initialize it first and then continue automatically after init completes. Let the skill route from repo-local task artifacts and choose the smallest valid child setup automatically.
 ...
 ```
 
@@ -120,9 +123,10 @@ For all prompts, replace `...` with `Task ID: <task-id>` and either `Task file: 
 
 This short prompt is the canonical entrypoint. Do not push routing policy into the user prompt; keep orchestration inside the skill.
 
-This skill is intentionally proof-first, so `init` always comes before build.
+This skill is intentionally proof-first, so `init` always comes before build and `route` happens before any child decomposition.
 Keep `task-builder` inheritance-first so the parent session controls implementation depth. Use the installed helper roles to save tokens on bounded work:
 
+- `task-router` for durable route decisions and scoped dispatch briefs
 - `task-scout` for cheap read-only lookup and path mapping
 - `task-explorer` for deeper read-only tracing and contract analysis
 - `task-worker-lite` for one-file or tightly bounded low-risk edits
@@ -140,9 +144,10 @@ For users, the intended interaction stays simple: run Codex, mention `$repo-task
 
 ## Helper Script
 
-The bundled helper script currently ships three CLI commands:
+The bundled helper script currently ships four CLI commands:
 
 - `init` - create the repo-local task folder, artifacts, guides, and subagents
+- `route` - refresh `routing.json` and dispatch briefs from the current task state
 - `validate`
 - `status` - inspect an existing initialized task
 
@@ -178,6 +183,15 @@ python3 "$SKILL_PATH/scripts/task_loop.py" init \
   --task-id feature-auth-hardening \
   --task-text "Implement auth hardening for session refresh and logout."
 ```
+
+Route:
+
+```bash
+python3 "$SKILL_PATH/scripts/task_loop.py" route \
+  --task-id feature-auth-hardening
+```
+
+Run `route` after `init`, and rerun it after the spec is frozen. Before spec freeze it may only schedule read-only discovery roles. After spec freeze it may emit implementation dispatch briefs scoped to frozen ACs.
 
 Validate:
 
@@ -229,14 +243,16 @@ It checks the skill structure, initializes temporary repositories, installs the 
 
 This installed copy uses a deliberate cost ladder aligned with the current OpenAI model docs:
 
+- `task-router` uses `gpt-5.5` at `medium` for route decisions, dispatch briefs, and minimal decomposition.
+- `task-spec-freezer` uses `gpt-5.5` at `low` for the frozen task contract.
 - `task-builder` inherits the parent session. Run the parent strong when the task is large or ambiguous.
 - `task-scout` uses `gpt-5.4-mini` at `low` for cheap read-only ownership and lookup work.
 - `task-explorer` uses `gpt-5.4-mini` at `high` for deeper read-only tracing where the task is still bounded but requires more reasoning.
 - `task-worker-lite` uses `gpt-5.4-mini` at `medium` for narrow edits with explicit ownership.
 - `task-worker-strong` uses `gpt-5.4` at `high` for bounded but riskier implementation work.
-- `task-verifier` stays on `gpt-5.4` as the judge role.
+- `task-verifier` uses `gpt-5.5` at `medium` as the fresh judge role.
 
-That keeps the strongest reasoning on orchestration, integration, and judgment while offloading narrow work to cheaper helpers.
+That keeps contract-critical reasoning on routing, spec freeze, and judgment while offloading narrow work to cheaper helpers.
 
 ## More Detail
 

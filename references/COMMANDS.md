@@ -30,13 +30,30 @@ Parent action:
 scripts/task_loop.py init --task-id <TASK_ID> [--task-file path/to/task.md | --task-text "task text"]
 ```
 
-`init` is a serial prerequisite. Never overlap it with `freeze`, `build`, `evidence`, `verify`, `fix`, `validate`, `status`, or child-agent spawning.
+`init` is a serial prerequisite. Never overlap it with `route`, `freeze`, `build`, `evidence`, `verify`, `fix`, `validate`, `status`, or child-agent spawning.
 
 After `init`, inspect `.agent/tasks/<TASK_ID>/spec.md` and confirm the repo-local structure is present.
 In Codex, `/init` is optional and separate; this skill's initializer already manages the workflow block in `AGENTS.md`.
 In Claude Code, if `init` just created or refreshed `.claude/agents/*` during the current session, do not assume those refreshed agents are already available mid-session.
 In Claude Code, a TodoWrite list or visible task UI after `init` is optional session progress only. Do not treat it as a substitute for the repo-local task files.
 In Claude Code, after `init`, normal phase prompts should stay task-focused and let Claude auto-delegate. If delegation is not specific enough, restate the phase more explicitly in natural language rather than relying on out-of-band controls.
+
+## `route`
+
+Parent action:
+
+```bash
+scripts/task_loop.py route --task-id <TASK_ID> [--phase auto|pre-freeze|post-freeze]
+```
+
+Use `route` after `init` and again after the spec is frozen. Treat `routing.json` plus the matching brief under `.agent/tasks/<TASK_ID>/dispatches/` as the scoped child contract beyond the frozen spec.
+
+Rules:
+
+- Before spec freeze, `route` may schedule only `task-scout` or `task-explorer`.
+- After spec freeze, `route` may emit `task-builder`, `task-worker-lite`, or `task-worker-strong` dispatches scoped to explicit ACs.
+- Prefer the smallest valid decomposition and avoid speculative fan-out.
+- Keep one builder responsible for evidence and one fresh verifier responsible for verdict.
 
 ## `freeze`
 
@@ -103,7 +120,7 @@ Return to the parent with:
 
 ## Codex adaptive helpers
 
-Use these only after Codex delegation is explicitly authorized by the user and the task clearly splits into bounded scopes. Otherwise stay on the simpler serial proof loop.
+Use these only when `routing.json` explicitly chooses bounded fan-out and the task clearly splits into bounded scopes. Otherwise stay on the simpler serial proof loop.
 Installed helper roles in this skill:
 
 - `task-scout`: cheapest read-only lookup role for ownership, path mapping, symbol location, test discovery, and narrow proof probes
@@ -160,7 +177,7 @@ After the helpers finish, continue the primary task-builder child so it can inte
 
 ### Parent prompts for task-specific helper children in Codex adaptive fan-out
 
-Use these when the task clearly benefits from bounded parallel work and the user has already explicitly asked for delegation or parallel agent work. Once delegation is authorized, choose them from task shape and current delegation availability, keep the task tree shallow, and keep proof-loop artifact ownership with the custom `task-*` roles.
+Use these when the task clearly benefits from bounded parallel work and `routing.json` already calls for it. Choose them from the route result and current delegation availability, keep the task tree shallow, and keep proof-loop artifact ownership with the custom `task-*` roles.
 Keep helper fan-out modest and wave-based. Prefer up to 3 parallel helper children at once, then wait before the next phase.
 Keep helper routing parent-driven. Let `task-builder` inherit the parent session level. Prefer the installed helper roles as the default delegated path:
 
@@ -460,15 +477,17 @@ Return only:
 ```text
 Run this sequence strictly in order.
 1. init <TASK_ID>
-2. wait for init to finish, then confirm .agent/tasks/<TASK_ID>/spec.md exists
-3. freeze <TASK_ID> using one spec-freezer child
-4. build <TASK_ID> using one builder child
-5. evidence <TASK_ID> in the same builder child by default, otherwise in evidence-only mode
-6. verify <TASK_ID> using one fresh verifier child
-7. if verdict is PASS, stop
-8. if verdict is FAIL or UNKNOWN, run fix <TASK_ID> using one fixer child, fresh by default
-9. run verify <TASK_ID> again using one fresh verifier child
-10. repeat 7-9 until PASS or user stops the loop
+2. wait for init to finish, then confirm .agent/tasks/<TASK_ID>/spec.md and routing.json exist
+3. route <TASK_ID>
+4. freeze <TASK_ID> using one spec-freezer child
+5. route <TASK_ID> again from the frozen spec
+6. build <TASK_ID> using one builder child plus any bounded worker shards that routing.json explicitly scheduled
+7. evidence <TASK_ID> in the same builder child by default, otherwise in evidence-only mode
+8. verify <TASK_ID> using one fresh verifier child
+9. if verdict is PASS, stop
+10. if verdict is FAIL or UNKNOWN, run fix <TASK_ID> using one fixer child, fresh by default
+11. run verify <TASK_ID> again using one fresh verifier child
+12. repeat 9-11 until PASS or user stops the loop
 ```
 
 ### Codex adaptive fan-out path
@@ -477,23 +496,25 @@ Choose between this path and the simpler serial order automatically from the fro
 
 ```text
 1. init <TASK_ID>
-2. wait for init to finish, then confirm .agent/tasks/<TASK_ID>/spec.md exists
-3. inspect the current child-thread list with /agent in the CLI or the current product's exposed child-thread inventory surface
-4. if the spec is not stable yet, fan out up to 3 `task-scout` or `task-explorer` children in parallel with disjoint questions or path scopes; use built-in `explorer` only as fallback when the task-specific helper roles are unavailable in the current product surface
-5. wait for those explorers, then freeze <TASK_ID> using one spec-freezer child
-6. spawn one task-builder child as the integration owner
-7. if implementation splits cleanly, fan out bounded helper children in parallel:
+2. wait for init to finish, then confirm .agent/tasks/<TASK_ID>/spec.md and routing.json exist
+3. run route <TASK_ID>
+4. inspect the current child-thread list with /agent in the CLI or the current product's exposed child-thread inventory surface
+5. if the route result is pre-freeze discovery fan-out, run up to 3 `task-scout` or `task-explorer` children in parallel with disjoint questions or path scopes; use built-in `explorer` only as fallback when the task-specific helper roles are unavailable in the current product surface
+6. wait for those explorers, then freeze <TASK_ID> using one spec-freezer child
+7. run route <TASK_ID> again from the frozen spec
+8. spawn one task-builder child as the integration owner
+9. if implementation splits cleanly, fan out bounded helper children in parallel:
    - `task-scout` for cheap read-only lookup work
    - `task-explorer` for deeper read-only tracing
    - `task-worker-lite` for narrow low-risk edits
    - `task-worker-strong` for bounded multi-file or ambiguity-prone edits
    - use built-in `explorer` or `worker` only as fallback when the task-specific roles are unavailable in the current product surface
-8. continue the live builder with send_input so it integrates the current repo state, reruns focused checks, and evidence <TASK_ID>
-9. if proof still needs extra read-only probes, fan out bounded `task-scout` or `task-explorer` children in parallel to rerun disjoint checks or inspect separate proof gaps
-10. wait for those proof explorers, then run verify <TASK_ID> using one fresh verifier child
-11. if verdict is PASS, stop
-12. if verdict is FAIL or UNKNOWN, run fix <TASK_ID> using one fixer child, then run verify <TASK_ID> again using one fresh verifier child
-13. repeat 11-12 until PASS or user stops the loop
+10. continue the live builder with send_input so it integrates the current repo state, reruns focused checks, and evidence <TASK_ID>
+11. if proof still needs extra read-only probes, fan out bounded `task-scout` or `task-explorer` children in parallel to rerun disjoint checks or inspect separate proof gaps
+12. wait for those proof explorers, then run verify <TASK_ID> using one fresh verifier child
+13. if verdict is PASS, stop
+14. if verdict is FAIL or UNKNOWN, run fix <TASK_ID> using one fixer child, then run verify <TASK_ID> again using one fresh verifier child
+15. repeat 13-14 until PASS or user stops the loop
 ```
 
 ## `status`
