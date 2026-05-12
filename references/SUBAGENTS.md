@@ -44,19 +44,19 @@ Each file in this skill defines:
 The Codex templates also use `nickname_candidates` for cleaner UI labels when several spawned children are visible at once.
 
 Other `config.toml` keys could be added later if needed, but this skill mostly inherits the parent session's model, sandbox, tools, and MCP configuration.
-This installed copy pins the roles that can be safely bounded:
+This installed copy pins the roles that can be safely bounded with a minimum-sufficient capability and cost policy:
 
-- `task-router` -> `gpt-5.5`, `medium`, `read-only`
-- `task-spec-freezer` -> `gpt-5.5`, `low`, `read-only`
+- `task-router` -> `gpt-5.4-mini`, `medium`, `read-only`
+- `task-spec-freezer` -> `gpt-5.4-mini`, `low`, `read-only`
 - `task-scout` -> `gpt-5.4-mini`, `low`, `read-only`
 - `task-explorer` -> `gpt-5.4-mini`, `high`, `read-only`
-- `task-verifier` -> `gpt-5.5`, `medium`, `read-only`
+- `task-verifier` -> `gpt-5.3-codex`, `medium`, `read-only`
 - `task-worker-lite` -> `gpt-5.4-mini`, `medium`
-- `task-worker-strong` -> `gpt-5.4`, `high`
+- `task-worker-strong` -> `gpt-5.3-codex`, `high`
 - `task-fixer` -> `gpt-5.4-mini`, `medium`
 - `task-builder` -> inherits the parent session model and tool surface
 
-That split keeps the main implementation path strong while reducing spend on read-heavy or tightly-scoped helper roles.
+That split keeps bounded subagent work on the strongest current mini model OpenAI positions for coding and subagents, uses the Codex-specialized model for stronger code-facing roles, and reduces spend on read-heavy or tightly-scoped helper roles.
 
 Codex also ships built-in `default`, `worker`, and `explorer` roles. This skill adds task-specific roles alongside those built-ins and treats the built-ins as fallback options rather than the default delegated path.
 Per the Codex subagents docs, optional fields such as `model` and `model_reasoning_effort` inherit from the parent session when omitted. This skill uses that inheritance intentionally for `task-builder` and for the built-in helper roles unless the parent explicitly chooses otherwise.
@@ -81,6 +81,7 @@ For installed helper roles:
 - `task-worker-strong` for bounded multi-file or ambiguity-prone edits
 - Keep ambiguous, architecture-touching, or integration-heavy work on the parent or `task-builder`
 - Built-in `explorer` and `worker` still exist, but these installed helper roles are the default cost-controlled path for this workflow
+- Escalate above the pinned role only when the parent session has explicit reason to spend more for risk, ambiguity, or failed verification
 
 ## Role definitions
 

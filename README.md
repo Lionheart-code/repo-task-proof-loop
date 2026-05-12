@@ -241,18 +241,18 @@ It checks the skill structure, initializes temporary repositories, installs the 
 
 ## Helper routing
 
-This installed copy uses a deliberate cost ladder aligned with the current OpenAI model docs:
+This installed copy uses a minimum-sufficient capability and cost ladder aligned with the current OpenAI model docs:
 
-- `task-router` uses `gpt-5.5` at `medium` for route decisions, dispatch briefs, and minimal decomposition.
-- `task-spec-freezer` uses `gpt-5.5` at `low` for the frozen task contract.
+- `task-router` uses `gpt-5.4-mini` at `medium` for route decisions, dispatch briefs, and minimal decomposition.
+- `task-spec-freezer` uses `gpt-5.4-mini` at `low` for the frozen task contract.
 - `task-builder` inherits the parent session. Run the parent strong when the task is large or ambiguous.
 - `task-scout` uses `gpt-5.4-mini` at `low` for cheap read-only ownership and lookup work.
 - `task-explorer` uses `gpt-5.4-mini` at `high` for deeper read-only tracing where the task is still bounded but requires more reasoning.
 - `task-worker-lite` uses `gpt-5.4-mini` at `medium` for narrow edits with explicit ownership.
-- `task-worker-strong` uses `gpt-5.4` at `high` for bounded but riskier implementation work.
-- `task-verifier` uses `gpt-5.5` at `medium` as the fresh judge role.
+- `task-worker-strong` uses `gpt-5.3-codex` at `high` for bounded but riskier implementation work.
+- `task-verifier` uses `gpt-5.3-codex` at `medium` as the fresh judge role by default.
 
-That keeps contract-critical reasoning on routing, spec freeze, and judgment while offloading narrow work to cheaper helpers.
+That keeps bounded subagent work on the strongest current mini model OpenAI positions for coding and subagents, while reserving the Codex-specialized model for stronger implementation and fresh judgment without paying for GPT-5.5.
 
 ## More Detail
 
