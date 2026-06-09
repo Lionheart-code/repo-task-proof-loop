@@ -50,13 +50,13 @@ This installed copy pins the roles that can be safely bounded with a minimum-suf
 - `task-spec-freezer` -> `gpt-5.4-mini`, `low`, `read-only`
 - `task-scout` -> `gpt-5.4-mini`, `low`, `read-only`
 - `task-explorer` -> `gpt-5.4-mini`, `high`, `read-only`
-- `task-verifier` -> `gpt-5.3-codex`, `medium`, `read-only`
+- `task-verifier` -> `gpt-5.4`, `medium`, `read-only`
 - `task-worker-lite` -> `gpt-5.4-mini`, `medium`
-- `task-worker-strong` -> `gpt-5.3-codex`, `high`
+- `task-worker-strong` -> `gpt-5.4`, `high`
 - `task-fixer` -> `gpt-5.4-mini`, `medium`
 - `task-builder` -> inherits the parent session model and tool surface
 
-That split keeps bounded subagent work on the strongest current mini model OpenAI positions for coding and subagents, uses the Codex-specialized model for stronger code-facing roles, and reduces spend on read-heavy or tightly-scoped helper roles.
+That split keeps bounded subagent work on the strongest current mini model OpenAI positions for coding and subagents, uses `gpt-5.4` as the practical non-mini tier for stronger code-facing roles, and reduces spend on read-heavy or tightly-scoped helper roles.
 
 Codex also ships built-in `default`, `worker`, and `explorer` roles. This skill adds task-specific roles alongside those built-ins and treats the built-ins as fallback options rather than the default delegated path.
 Per the Codex subagents docs, optional fields such as `model` and `model_reasoning_effort` inherit from the parent session when omitted. This skill uses that inheritance intentionally for `task-builder` and for the built-in helper roles unless the parent explicitly chooses otherwise.

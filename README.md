@@ -249,10 +249,10 @@ This installed copy uses a minimum-sufficient capability and cost ladder aligned
 - `task-scout` uses `gpt-5.4-mini` at `low` for cheap read-only ownership and lookup work.
 - `task-explorer` uses `gpt-5.4-mini` at `high` for deeper read-only tracing where the task is still bounded but requires more reasoning.
 - `task-worker-lite` uses `gpt-5.4-mini` at `medium` for narrow edits with explicit ownership.
-- `task-worker-strong` uses `gpt-5.3-codex` at `high` for bounded but riskier implementation work.
-- `task-verifier` uses `gpt-5.3-codex` at `medium` as the fresh judge role by default.
+- `task-worker-strong` uses `gpt-5.4` at `high` for bounded but riskier implementation work.
+- `task-verifier` uses `gpt-5.4` at `medium` as the fresh judge role by default.
 
-That keeps bounded subagent work on the strongest current mini model OpenAI positions for coding and subagents, while reserving the Codex-specialized model for stronger implementation and fresh judgment without paying for GPT-5.5.
+That keeps bounded subagent work on the strongest current mini model OpenAI positions for coding and subagents, while using `gpt-5.4` as the practical non-mini replacement for stronger implementation and fresh judgment without paying for GPT-5.5.
 
 ## More Detail
 

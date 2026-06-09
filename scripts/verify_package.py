@@ -193,11 +193,11 @@ def main() -> int:
         if 'model = "gpt-5.4-mini"' not in generated_worker_lite or 'model_reasoning_effort = "medium"' not in generated_worker_lite:
             raise SystemExit("Expected generated Codex task-worker-lite template to pin gpt-5.4-mini at medium reasoning.")
         generated_worker_strong = (repo / ".codex" / "agents" / "task-worker-strong.toml").read_text(encoding="utf-8")
-        if 'model = "gpt-5.3-codex"' not in generated_worker_strong or 'model_reasoning_effort = "high"' not in generated_worker_strong:
-            raise SystemExit("Expected generated Codex task-worker-strong template to pin gpt-5.3-codex at high reasoning.")
+        if 'model = "gpt-5.4"' not in generated_worker_strong or 'model_reasoning_effort = "high"' not in generated_worker_strong:
+            raise SystemExit("Expected generated Codex task-worker-strong template to pin gpt-5.4 at high reasoning.")
         generated_verifier = (repo / ".codex" / "agents" / "task-verifier.toml").read_text(encoding="utf-8")
-        if 'model = "gpt-5.3-codex"' not in generated_verifier or 'model_reasoning_effort = "medium"' not in generated_verifier:
-            raise SystemExit("Expected generated Codex task-verifier template to pin gpt-5.3-codex at medium reasoning.")
+        if 'model = "gpt-5.4"' not in generated_verifier or 'model_reasoning_effort = "medium"' not in generated_verifier:
+            raise SystemExit("Expected generated Codex task-verifier template to pin gpt-5.4 at medium reasoning.")
 
         pre_route_result = run(
             [sys.executable, str(task_loop), "route", "--task-id", "demo-task", "--phase", "auto"],
